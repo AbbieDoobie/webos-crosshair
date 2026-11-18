@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Crosshair Settings Mock</title>
+<!--
+  Development page: the real settings panel (same CSS, markup, and scripts) over a grey
+  stand-in for a game, with the crosshair service emulated by mock-bridge.js. The 1920x1080
+  page is scaled to fit the window. Arrow keys, Enter, and Escape act as the remote.
+  ?hdr=1 pretends the TV is showing HDR.
+-->
+<link rel="stylesheet" href="../crosshair/settings/settings.css">
+<style>
+    html { background: #1a1a1a; }
+    #tv { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+          transform-origin: 0 0; background: linear-gradient(135deg, #4b5a46, #6d6a58 60%, #3e4a5a); }
+</style>
+</head>
+<body>
+<div id="tv">
+<svg id="preview" width="1920" height="1080" viewBox="0 0 1920 1080"
+     xmlns="http://www.w3.org/2000/svg"></svg>
+<div id="panel">
+    <div id="title">Crosshair</div>
+    <div id="rows"></div>
+    <div id="message"></div>
+    <div id="hint">&#9650;&#9660; choose &nbsp;&middot;&nbsp; &#9664;&#9654; change &nbsp;&middot;&nbsp; OK select &nbsp;&middot;&nbsp; BACK close</div>
+</div>
+</div>
+<script>
+    function fit() {
+        var s = Math.min(innerWidth / 1920, innerHeight / 1080);
+        document.getElementById('tv').style.transform = 'scale(' + s + ')';
+    }
+    addEventListener('resize', fit); fit();
+</script>
+<script src="../crosshair/shared/config.js"></script>
+<script src="mock-bridge.js"></script>
+<script src="../crosshair/shared/luna.js"></script>
+<script src="../crosshair/shared/render.js"></script>
+<script src="../crosshair/settings/settings.js"></script>
+</body>
+</html>

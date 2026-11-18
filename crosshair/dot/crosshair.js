@@ -23,7 +23,7 @@
                 return;
             }
             if (!reply.config) return;
-            if (reply.config.visible) CrosshairRender.draw(svg, reply.config);
+            if (reply.config.visible) CrosshairRender.draw(svg, reply.config, { hdr: reply.hdr });
             else CrosshairRender.clear(svg);
         });
     }

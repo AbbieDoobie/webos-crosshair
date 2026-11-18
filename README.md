@@ -6,9 +6,13 @@ itself after the screen sleeps.
 
 ## Features
 
-- Six shapes: dot, cross, cross with a centre dot, T, circle, and circle with a centre dot.
-- Color, size, thickness, gap, opacity, and an optional outline.
-- Move it left, right, up, or down for games whose aim point isn't the exact centre.
+- 21 shapes: dots, circles, crosses, T, X, scope, squares, diamonds, corner brackets, a
+  chevron, a triangle, and dot patterns.
+- Color presets or any hue, size, thickness, gap, opacity, and an optional outline.
+- Separate brightness for SDR and HDR, switched automatically: the TV draws app graphics much
+  brighter over HDR games.
+- Move it anywhere on screen for games whose aim point isn't the exact centre. Hold Left or
+  Right in the settings to move faster.
 - On-TV settings: open **Crosshair** from the app list. An on/off switch sits at the top.
   While the crosshair is off, selecting a look setting previews it in place. While it's on,
   changes show live on the real one.
@@ -47,16 +51,24 @@ by itself.
 |---|---|---|
 | Crosshair | On / Off | Off |
 | Auto-start with TV | On / Off: on after every boot or wake from standby | Off |
-| Shape | Dot, Cross, Cross + dot, T, Circle, Circle + dot | Dot |
-| Color | Green, Red, Cyan, Yellow, Magenta, Orange, Pink, White | Green |
-| Size | 2 to 64 | 8 |
-| Thickness | 1 to 8 (not for Dot) | 2 |
-| Gap | 0 to 32 (cross shapes) | 3 |
+| Shape | Dot, Circle, Circle + dot, Broken circle, Cross, Cross + dot, T, T + dot, X, X + dot, Scope, Horizontal line, Square, Square + dot, Diamond, Diamond + dot, Corner brackets, Chevron, Triangle, Four dots, Five dots | Dot |
+| Size | 2 to 96 | 8 |
+| Thickness | 1 to 8 (shapes with lines) | 2 |
+| Gap | 0 to 32 (shapes with a gap) | 3 |
+| Color | Green, Lime, Yellow, Orange, Red, Pink, Magenta, Purple, Blue, Cyan, White | Green |
+| Custom color | Any hue, in 5-degree steps | |
+| Brightness | 10% to 100%, used for SDR pictures | 100% |
+| HDR brightness | 10% to 100%, used while the TV shows HDR | 70% |
 | Opacity | 10% to 100% | 100% |
 | Outline | On / Off, Black or White, width 1 to 3 | Off |
-| Move left / right, up / down | -300 to 300 | 0 |
+| Move left / right | -900 to 900 | 0 |
+| Move up / down | -500 to 500 | 0 |
+| Center it | Puts it back in the middle | |
 
-Sizes are in 1080p pixels. On a 4K panel each one is two physical pixels.
+Sizes are in 1080p pixels: the TV draws app graphics at 1080p, so on a 4K panel each one is
+a 2x2 block of physical pixels.
+
+Brightness gives an opaque, darker shade of the color. Opacity lets the game show through it.
 
 ## Technical Stuff and Limitations
 
@@ -66,6 +78,8 @@ Sizes are in 1080p pixels. On a 4K panel each one is two physical pixels.
 - The crosshair is a `floating` window: a compositor layer above the full-screen input,
   below the TV's own menus. The 2-minute idle timer that closes overlay windows doesn't touch
   it, and it doesn't take remote focus.
+- The crosshair doesn't change Game Optimizer, ALLM, VRR, HDR, or the refresh rate (checked at
+  4K 120 Hz HDR10; `scripts/tv/gamecheck.sh`).
 - Off closes the crosshair app entirely. On starts it again in about half a second. While
   on, it costs about 30 MB for the web page, and the service about 21 MB, with no CPU use
   while idle.
@@ -90,8 +104,12 @@ python scripts/deploy.py <ssh-host>
 | `crosshair/shared/` | `config.js` (settings schema and validation), `render.js` (draws the crosshair), and `luna.js` (bus client), copied into each package |
 | `crosshair/boot/` | Homebrew Channel boot hook |
 | `scripts/` | `build.py`, `deploy.py`, and `icons.py` (generates the launcher icons) |
+| `scripts/tv/` | Run on the TV: `status.sh` (health check) and `gamecheck.sh` (game-mode A/B test) |
+| `dev/` | Desktop previews: `gallery.html` (every shape) and `settings.html` (the panel, with a mock service). Serve the repo with `python -m http.server` |
+| `extras/inputhook-autostart/` | A more reliable boot start for LG Input Hook (see its comments) |
 
-Service API, at `luna://org.abbie.crosshair.service/`: `getConfig` (subscribable),
+Service API, at `luna://org.abbie.crosshair.service/`: `getConfig` (subscribable; also
+reports whether the picture is HDR),
 `setConfig {config}`, `resetConfig`, `show`, `hide`, `toggle`, `status`, and `start`.
 
 Settings live in `/home/root/.config/org.abbie.crosshair/config.json`. The service log is

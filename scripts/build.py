@@ -23,7 +23,7 @@ import icons  # noqa: E402
 COMPONENTS = {
     "settings": ["luna.js", "config.js", "render.js"],
     "service": ["config.js"],
-    "dot": ["luna.js", "render.js"],
+    "dot": ["luna.js", "config.js", "render.js"],
 }
 
 

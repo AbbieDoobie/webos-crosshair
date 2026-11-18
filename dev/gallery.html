@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Crosshair Gallery</title>
+<!--
+  Development page: every shape, drawn by the shipping render.js, at 4x zoom on a grey
+  "game" background, plain and outlined. Open in a desktop browser; no TV needed.
+-->
+<style>
+    body { margin: 0; padding: 16px; background: #222; color: #ddd; font: 14px sans-serif; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, 220px); gap: 12px; }
+    .cell { background: #5a6470; border-radius: 8px; overflow: hidden; }
+    .label { padding: 4px 8px; background: #111; }
+    .view { width: 220px; height: 160px; position: relative; overflow: hidden; }
+    /* Show a 55x40 region around the aim point at 4x. */
+    .view svg { position: absolute; transform-origin: 0 0; transform: scale(4);
+                left: calc(-932.5px * 4); top: calc(-520px * 4); }
+    .aim { position: absolute; left: 109px; top: 79px; width: 2px; height: 2px; background: #f0f; }
+    h2 { font-weight: normal; margin: 20px 0 8px; }
+</style>
+</head>
+<body>
+<h2>Plain (size 16, thickness 2, gap 4), magenta pixel = aim point</h2>
+<div class="grid" id="plain"></div>
+<h2>Outlined, HDR brightness 70%</h2>
+<div class="grid" id="outlined"></div>
+<script src="../crosshair/shared/config.js"></script>
+<script src="../crosshair/shared/render.js"></script>
+<script>
+    var C = CrosshairConfig;
+    function fill(id, patch, opts) {
+        var grid = document.getElementById(id);
+        C.SHAPES.forEach(function (shape) {
+            var cell = document.createElement('div');
+            cell.className = 'cell';
+            var view = document.createElement('div');
+            view.className = 'view';
+            var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('width', 1920); svg.setAttribute('height', 1080);
+            svg.setAttribute('viewBox', '0 0 1920 1080');
+            view.appendChild(svg);
+            var aim = document.createElement('div'); aim.className = 'aim'; view.appendChild(aim);
+            cell.appendChild(view);
+            var label = document.createElement('div');
+            label.className = "label"; label.textContent = C.SHAPE_NAMES[shape];
+            cell.appendChild(label);
+            grid.appendChild(cell);
+            var cfg = C.merge(C.DEFAULTS, patch);
+            cfg.shape = shape;
+            CrosshairRender.draw(svg, cfg, opts);
+        });
+    }
+    fill('plain', { size: 16, thickness: 2, gap: 4 }, { hdr: false });
+    fill('outlined', { size: 16, thickness: 2, gap: 4, outline: true, outlineWidth: 1, color: '#ff0000' }, { hdr: true });
+</script>
+</body>
+</html>

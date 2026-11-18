@@ -6,8 +6,9 @@
  * whenever a look setting is selected, with the same drawing code, in its own full-screen
  * transparent window. Nothing else launches, so the panel keeps the remote.
  *
- * Remote: Up/Down choose a row, Left/Right change it, OK toggles or runs it, Back closes.
- * The Magic Remote pointer works too: click a row's arrows, a switch, or the row itself.
+ * Remote: Up/Down choose a row, Left/Right change it (hold to speed up), OK toggles or
+ * runs it, Back closes. The Magic Remote pointer works too: click a row's arrows, a
+ * switch, or the row itself.
  */
 (function () {
     'use strict';
@@ -16,22 +17,32 @@
     var C = CrosshairConfig;
 
     var KEY = { LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, OK: 13, BACK: 461, ESC: 27 };
+    var HUE_STEP = 5;
+    var REPEAT_MS = 300;        // presses closer than this count as holding the key
 
     var config = null;
+    var hdr = false;            // the TV is showing HDR, so HDR brightness is in use
     var selectedKey = 'visible';
-    var requestSeq = 0;        // newest setConfig sent
-    var inFlight = 0;          // setConfig calls not yet answered
+    var requestSeq = 0;         // newest setConfig sent
+    var inFlight = 0;           // setConfig calls not yet answered
+    var lastKey = 0;
+    var lastKeyTime = 0;
+    var repeats = 0;
+
     var rowsEl = document.getElementById('rows');
     var messageEl = document.getElementById('message');
     var previewEl = document.getElementById('preview');
 
-    function isCross(c) { return c.shape === 'cross' || c.shape === 'crossdot' || c.shape === 'tcross'; }
-    function hasLines(c) { return c.shape !== 'dot'; }
+    function uses(control) {
+        return function (c) { return C.SHAPE_INFO[c.shape].uses.indexOf(control) >= 0; };
+    }
 
     function colorName(list, value) {
         for (var i = 0; i < list.length; i++) if (list[i].value === value) return list[i].name;
-        return value;
+        return 'Custom';
     }
+
+    function percent(v) { return Math.round(v * 100) + '%'; }
 
     var ROWS = [
         { key: 'visible', label: 'Crosshair', type: 'bool' },
@@ -39,12 +50,17 @@
         { divider: true },
         { key: 'shape', label: 'Shape', type: 'choice', choices: C.SHAPES,
             format: function (v) { return C.SHAPE_NAMES[v]; } },
-        { key: 'color', label: 'Color', type: 'color', choices: C.COLORS },
         { key: 'size', label: 'Size', type: 'number' },
-        { key: 'thickness', label: 'Thickness', type: 'number', when: hasLines },
-        { key: 'gap', label: 'Gap', type: 'number', when: isCross },
-        { key: 'opacity', label: 'Opacity', type: 'number',
-            format: function (v) { return Math.round(v * 100) + '%'; } },
+        { key: 'thickness', label: 'Thickness', type: 'number', when: uses('thickness') },
+        { key: 'gap', label: 'Gap', type: 'number', when: uses('gap') },
+        { divider: true },
+        { key: 'color', label: 'Color', type: 'color', choices: C.COLORS },
+        { key: 'hue', label: 'Custom color', type: 'hue' },
+        { key: 'brightness', label: 'Brightness', type: 'number', format: percent,
+            tag: function () { return hdr ? '' : 'in use'; } },
+        { key: 'hdrBrightness', label: 'HDR brightness', type: 'number', format: percent,
+            tag: function () { return hdr ? 'in use' : ''; } },
+        { key: 'opacity', label: 'Opacity', type: 'number', format: percent },
         { divider: true },
         { key: 'outline', label: 'Outline', type: 'bool' },
         { key: 'outlineColor', label: 'Outline color', type: 'color', choices: C.OUTLINE_COLORS,
@@ -54,6 +70,7 @@
         { divider: true },
         { key: 'offsetX', label: 'Move left / right', type: 'number' },
         { key: 'offsetY', label: 'Move up / down', type: 'number' },
+        { key: 'center', label: 'Center it', type: 'action' },
         { divider: true },
         { key: 'reset', label: 'Reset to defaults', type: 'action' },
         { key: 'close', label: 'Close', type: 'action' }
@@ -88,6 +105,19 @@
         });
     }
 
+    /* How many steps one press moves, growing while Left/Right is held. Only for settings
+       with long ranges; short ones stay one step per press. */
+    function stepsFor(row) {
+        var range;
+        if (row.type === 'hue') range = 360 / HUE_STEP;
+        else if (row.type === 'number') {
+            var spec = C.NUMBERS[row.key];
+            range = (spec.max - spec.min) / spec.step;
+        } else return 1;
+        if (range < 40) return 1;
+        return repeats >= 20 ? 10 : repeats >= 8 ? 5 : repeats >= 3 ? 2 : 1;
+    }
+
     function step(row, dir) {
         var patch = {};
         var v = config[row.key];
@@ -100,8 +130,11 @@
             var i = list.indexOf(v);
             i = (i < 0) ? 0 : (i + dir + list.length) % list.length;
             patch[row.key] = list[i];
+        } else if (row.type === 'hue') {
+            var hue = C.hexToHue(config.color, HUE_STEP) + dir * HUE_STEP * stepsFor(row);
+            patch.color = C.hueToHex(hue);
         } else if (row.type === 'number') {
-            patch[row.key] = v + dir * C.NUMBERS[row.key].step;
+            patch[row.key] = v + dir * C.NUMBERS[row.key].step * stepsFor(row);
         } else {
             return;
         }
@@ -110,6 +143,7 @@
 
     function activate(row) {
         if (row.type === 'bool') step(row, config[row.key] ? -1 : 1);
+        else if (row.key === 'center') send({ offsetX: 0, offsetY: 0 });
         else if (row.key === 'reset') resetConfig();
         else if (row.key === 'close') close();
     }
@@ -138,8 +172,15 @@
     function valueText(row) {
         var v = config[row.key];
         if (row.type === 'color') return colorName(row.choices, v);
+        if (row.type === 'hue') return C.hexToHue(config.color, HUE_STEP) + '°';
         if (row.format) return row.format(v);
         return String(v);
+    }
+
+    function swatchColor(row) {
+        if (row.type === 'color') return config[row.key];
+        if (row.type === 'hue') return C.hueToHex(C.hexToHue(config.color, HUE_STEP));
+        return null;
     }
 
     function switchEl(row) {
@@ -151,10 +192,23 @@
         return sw;
     }
 
+    function arrow(row, dir) {
+        var a = document.createElement('span');
+        a.className = 'arrow';
+        a.textContent = dir < 0 ? '◀' : '▶';
+        a.addEventListener('click', function (e) {
+            e.stopPropagation();
+            selectedKey = row.key;
+            repeats = 0;
+            step(row, dir);
+        });
+        return a;
+    }
+
     /* While the crosshair is off, draw it here whenever a look setting is selected. */
     function renderPreview() {
         var show = !config.visible && C.LOOK_KEYS.indexOf(selectedKey) >= 0;
-        if (show) CrosshairRender.draw(previewEl, config);
+        if (show) CrosshairRender.draw(previewEl, config, { hdr: hdr });
         else CrosshairRender.clear(previewEl);
     }
 
@@ -170,6 +224,7 @@
             selectedKey = 'visible';
         }
 
+        var selectedEl = null;
         rowsEl.textContent = '';
         rows.forEach(function (row) {
             if (row.divider) {
@@ -181,10 +236,18 @@
             var el = document.createElement('div');
             el.className = 'row' + (row.type === 'action' ? ' action' : '') +
                 (row.key === selectedKey ? ' selected' : '');
+            if (row.key === selectedKey) selectedEl = el;
 
             var label = document.createElement('span');
             label.className = 'label';
             label.textContent = row.label;
+            var tagText = row.tag && row.tag();
+            if (tagText) {
+                var tag = document.createElement('span');
+                tag.className = 'tag';
+                tag.textContent = tagText;
+                label.appendChild(tag);
+            }
             el.appendChild(label);
 
             if (row.type === 'bool') {
@@ -195,33 +258,18 @@
             } else if (row.type !== 'action') {
                 var value = document.createElement('span');
                 value.className = 'value';
-
-                var left = document.createElement('span');
-                left.className = 'arrow';
-                left.textContent = '◀';
-                left.addEventListener('click', function (e) {
-                    e.stopPropagation(); selectedKey = row.key; step(row, -1);
-                });
-
-                var text = document.createElement('span');
-                text.textContent = valueText(row);
-
-                var right = document.createElement('span');
-                right.className = 'arrow';
-                right.textContent = '▶';
-                right.addEventListener('click', function (e) {
-                    e.stopPropagation(); selectedKey = row.key; step(row, 1);
-                });
-
-                value.appendChild(left);
-                if (row.type === 'color') {
+                value.appendChild(arrow(row, -1));
+                var swatch = swatchColor(row);
+                if (swatch) {
                     var sw = document.createElement('span');
                     sw.className = 'swatch';
-                    sw.style.background = config[row.key];
+                    sw.style.background = swatch;
                     value.appendChild(sw);
                 }
+                var text = document.createElement('span');
+                text.textContent = valueText(row);
                 value.appendChild(text);
-                value.appendChild(right);
+                value.appendChild(arrow(row, 1));
                 el.appendChild(value);
             }
 
@@ -235,6 +283,26 @@
             });
             rowsEl.appendChild(el);
         });
+
+        // Keep the selected row in view, clear of the faded edges, when the list is taller
+        // than the panel.
+        if (selectedEl) {
+            var margin = 80;                    // more than the 56px edge fade
+            var top = selectedEl.offsetTop;     // #rows is the offset parent
+            var bottom = top + selectedEl.offsetHeight;
+            if (top < rowsEl.scrollTop + margin) rowsEl.scrollTop = Math.max(0, top - margin);
+            else if (bottom > rowsEl.scrollTop + rowsEl.clientHeight - margin) {
+                rowsEl.scrollTop = bottom - rowsEl.clientHeight + margin;
+            }
+        }
+        updateScrollFade();
+    }
+
+    /* Fade the list's top or bottom edge while rows are hidden past it. */
+    function updateScrollFade() {
+        var above = rowsEl.scrollTop > 0;
+        var below = rowsEl.scrollTop + rowsEl.clientHeight < rowsEl.scrollHeight - 1;
+        rowsEl.className = (above ? 'more-above' : '') + (below ? ' more-below' : '');
     }
 
     // -----------------------------------------------------------------------------------
@@ -255,6 +323,11 @@
     }
 
     document.addEventListener('keydown', function (e) {
+        var now = Date.now();
+        repeats = (e.keyCode === lastKey && now - lastKeyTime < REPEAT_MS) ? repeats + 1 : 0;
+        lastKey = e.keyCode;
+        lastKeyTime = now;
+
         if (!config) {
             if (e.keyCode === KEY.BACK || e.keyCode === KEY.ESC) close();
             return;
@@ -272,6 +345,12 @@
         e.preventDefault();
     }, true);
 
+    rowsEl.addEventListener('wheel', function (e) {
+        rowsEl.scrollTop += e.deltaY;
+        updateScrollFade();
+        e.preventDefault();
+    });
+
     // -----------------------------------------------------------------------------------
 
     Luna.subscribe(SERVICE + 'getConfig', {}, function (reply) {
@@ -280,6 +359,10 @@
             return;
         }
         showMessage('');
+        if (typeof reply.hdr === 'boolean' && reply.hdr !== hdr) {
+            hdr = reply.hdr;
+            if (config) render();
+        }
         // While our own changes are in flight, the pushes are echoes of older values and
         // would make a held arrow key flicker backwards.
         if (reply.config && inFlight === 0) {

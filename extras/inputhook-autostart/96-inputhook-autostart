@@ -1,0 +1,50 @@
+#!/bin/sh
+# Reliable boot start for LG Input Hook (org.webosbrew.inputhook).
+#
+# Input Hook's own boot script has two failure modes:
+#   1. If its first start call returns an error (common early in boot), it deletes itself,
+#      so autostart is gone after one bad boot.
+#   2. The service injects into lginput2 only once, when it first loads, and then writes
+#      /tmp/inputhook so it never tries again. If it loads before lginput2 is running, it
+#      hooks nothing and stays that way until the next reboot.
+#
+# This script waits for lginput2, checks that the hook library is really loaded into it, and
+# if not, restarts the service with the marker cleared. It never deletes anything, and it
+# exits as soon as the hook is in place. Install in /var/lib/webosbrew/init.d/.
+
+(
+    SVC=org.webosbrew.inputhook.service
+    LOG=/tmp/inputhook-autostart.log
+
+    log() { echo "$(date '+%H:%M:%S') $*" >> "$LOG"; }
+
+    hooked() {
+        pid=$(pidof lginput2 | awk '{print $1}')
+        [ -n "$pid" ] && grep -q libinputhookpp "/proc/$pid/maps" 2>/dev/null
+    }
+
+    tries=0
+    while [ $tries -lt 60 ]; do              # about five minutes at most
+        if pidof lginput2 >/dev/null 2>&1; then
+            sleep 10                          # let lginput2 finish starting up
+            if hooked; then
+                log "hooked"
+                exit 0
+            fi
+            log "lginput2 not hooked; (re)starting Input Hook"
+            pkill -f "$SVC" 2>/dev/null
+            rm -f /tmp/inputhook
+            luna-send -n 1 "luna://$SVC/start" '{}' >/dev/null 2>&1
+            sleep 5
+            if hooked; then
+                log "hooked after restart"
+                exit 0
+            fi
+        fi
+        tries=$((tries + 1))
+        sleep 5
+    done
+    log "gave up: lginput2 never got hooked"
+) >/dev/null 2>&1 &
+
+exit 0

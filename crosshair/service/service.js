@@ -2,11 +2,12 @@
  * org.abbie.crosshair.service: owns the crosshair settings and keeps the dot on screen.
  *
  * Runs as root (Homebrew Channel's elevate-service). Event driven: it holds a keep-alive
- * activity and two subscriptions (power state and the running-app list), and does nothing
- * between events.
+ * activity and three subscriptions (power state, the running-app list, and the picture
+ * settings for HDR), and does nothing between events.
  *
  * Methods (luna://org.abbie.crosshair.service/<method>):
- *   getConfig {subscribe}   current settings; with subscribe, every change after
+ *   getConfig {subscribe}   current settings and whether the picture is HDR; with
+ *                           subscribe, a reply after every change to either
  *   setConfig {config}      apply a partial settings object; invalid fields are ignored
  *   resetConfig             defaults, keeping on/off and auto-start as they are
  *   show / hide / toggle    turn the crosshair on or off
@@ -47,6 +48,8 @@ var saveTimer = null;
 var UP_STATES = ['Active', 'Screen Off'];
 var powerState = 'Active';
 var dotRunning = null;          // null until the first running-app reply
+var hdr = false;                // the TV is showing an HDR picture (picks hdrBrightness)
+var dynamicRange = '';
 var launchTimes = [];
 var launchPending = false;
 
@@ -105,7 +108,32 @@ function applyConfig(next) {
 
 function broadcast() {
     configSubscribers.forEach(function (msg) {
-        msg.respond({ config: config, subscribed: true });
+        msg.respond({ config: config, hdr: hdr, subscribed: true });
+    });
+}
+
+// ---------------------------------------------------------------------------------------
+// HDR detection. The picture settings carry the current dynamic range as a "dimension"
+// (seen: "hdrALLM" for HDR10 game content with ALLM), and push a reply when it changes.
+
+function watchDynamicRange() {
+    var sub = service.subscribe('luna://com.webos.settingsservice/getSystemSettings',
+        { category: 'picture', keys: ['pictureMode'], subscribe: true });
+    sub.on('response', function (reply) {
+        var dim = reply.payload.dimension;
+        if (!dim || typeof dim.dynamicRange !== 'string') return;
+        var range = dim.dynamicRange;
+        var isHdr = /hdr|hlg|dolby|dv/i.test(range) && !/^sdr/i.test(range);
+        if (range !== dynamicRange) log('INFO', 'dynamic range ' + range);
+        dynamicRange = range;
+        if (isHdr !== hdr) {
+            hdr = isHdr;
+            broadcast();
+        }
+    });
+    sub.on('cancel', function () {
+        log('WARN', 'picture settings subscription dropped, retrying');
+        setTimeout(watchDynamicRange, 5000);
     });
 }
 
@@ -197,7 +225,7 @@ function setVisible(msg, visible) {
 
 service.register('getConfig', function (msg) {
     if (msg.isSubscription) configSubscribers.push(msg);
-    msg.respond({ config: config, subscribed: !!msg.isSubscription });
+    msg.respond({ config: config, hdr: hdr, subscribed: !!msg.isSubscription });
 }, function (msg) {
     var i = configSubscribers.indexOf(msg);
     if (i >= 0) configSubscribers.splice(i, 1);
@@ -224,7 +252,10 @@ service.register('hide', function (msg) { setVisible(msg, false); });
 service.register('toggle', function (msg) { setVisible(msg, !config.visible); });
 
 service.register('status', function (msg) {
-    msg.respond({ config: config, dotLoaded: dotRunning === true, powerState: powerState });
+    msg.respond({
+        config: config, dotLoaded: dotRunning === true, powerState: powerState,
+        hdr: hdr, dynamicRange: dynamicRange
+    });
 });
 
 service.register('start', function (msg) {
@@ -256,3 +287,4 @@ if (!fs.existsSync(BOOT_MARKER)) {
 }
 watchPower();
 watchRunningApps();
+watchDynamicRange();

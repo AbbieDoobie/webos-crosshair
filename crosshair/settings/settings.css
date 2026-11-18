@@ -63,13 +63,45 @@ html, body {
     font-weight: bold;
 }
 
+/* The list scrolls (by the selection, or the pointer's wheel) when it is taller than this. */
+#rows {
+    position: relative;
+    max-height: 800px;
+    overflow: hidden;
+}
+
+#rows.more-below {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 56px), transparent);
+}
+
+#rows.more-above {
+    -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 56px), transparent);
+    mask-image: linear-gradient(to top, #000 calc(100% - 56px), transparent);
+}
+
+#rows.more-above.more-below {
+    -webkit-mask-image: linear-gradient(transparent, #000 56px, #000 calc(100% - 56px), transparent);
+    mask-image: linear-gradient(transparent, #000 56px, #000 calc(100% - 56px), transparent);
+}
+
 .row {
     display: flex;
     align-items: center;
-    height: 56px;
+    height: 52px;
     padding: 0 32px;
-    font-size: 26px;
+    font-size: 25px;
     border-left: 6px solid transparent;
+}
+
+.tag {
+    margin-left: 12px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 16px;
+    vertical-align: middle;
+    color: #00e676;
+    background: rgba(0, 230, 118, 0.14);
 }
 
 .row.selected {
