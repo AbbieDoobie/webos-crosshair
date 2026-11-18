@@ -1,0 +1,85 @@
+"""Install the built IPKs on a rooted webOS TV and restart the crosshair.
+
+Usage: python scripts/deploy.py <ssh-host>
+
+<ssh-host> is anything ssh accepts (root@<ip>, or a Host alias from your ssh config).
+The TV needs root SSH from the Homebrew Channel. Run scripts/build.py first.
+
+Steps, all on the TV: install both IPKs, elevate the service to root with the Homebrew
+Channel's elevate-service, put the boot hook in /var/lib/webosbrew/init.d, restart the
+service, and reload the dot app so it runs the new code.
+"""
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+BUILD = ROOT / "build"
+BOOT_HOOK = ROOT / "crosshair" / "boot" / "95-abbie-crosshair"
+
+APPS = ["org.abbie.crosshair.dot", "org.abbie.crosshair"]
+SERVICE = "org.abbie.crosshair.service"
+
+REMOTE = r"""
+set -e
+HBC=/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service
+
+install_ipk() {
+    id="$1"; ipk="$2"; log="/tmp/crosshair-install-$id.log"
+    luna-send -i luna://com.webos.appInstallService/dev/install \
+        "{\"id\":\"$id\",\"ipkUrl\":\"$ipk\",\"subscribe\":true}" > "$log" 2>&1 &
+    pid=$!
+    i=0
+    while [ $i -lt 120 ]; do
+        if grep -q '"state":"installed"' "$log"; then kill $pid 2>/dev/null || true; echo "installed $id"; return 0; fi
+        if grep -qE 'install failed|"returnValue":false' "$log"; then
+            kill $pid 2>/dev/null || true; echo "FAILED $id:"; cat "$log"; return 1
+        fi
+        sleep 1; i=$((i + 1))
+    done
+    kill $pid 2>/dev/null || true; echo "TIMEOUT installing $id"; return 1
+}
+
+# This script arrives on stdin, so `pkill -f` can't match the shell running it.
+luna-send -n 1 luna://com.webos.applicationManager/closeByAppId '{"id":"org.abbie.crosshair.dot"}' >/dev/null 2>&1 || true
+pkill -f "__SERVICE__" 2>/dev/null || true
+
+__INSTALLS__
+
+"$HBC/elevate-service" __SERVICE__ >/tmp/crosshair-elevate.log 2>&1 || { echo "elevate failed:"; cat /tmp/crosshair-elevate.log; exit 1; }
+echo "elevated __SERVICE__"
+
+cp /tmp/95-abbie-crosshair /var/lib/webosbrew/init.d/95-abbie-crosshair
+chmod 755 /var/lib/webosbrew/init.d/95-abbie-crosshair
+echo "boot hook installed"
+
+pkill -f "__SERVICE__" 2>/dev/null || true
+sleep 1
+luna-send -n 1 luna://__SERVICE__/start '{}'
+echo
+rm -f /tmp/org.abbie.crosshair*.ipk /tmp/95-abbie-crosshair
+"""
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    host = sys.argv[1]
+
+    ipks = {}
+    for app in APPS:
+        found = sorted(BUILD.glob(f"{app}_*_all.ipk"))
+        if not found:
+            sys.exit(f"no IPK for {app} in build/; run scripts/build.py first")
+        ipks[app] = found[-1]
+
+    files = [str(p) for p in ipks.values()] + [str(BOOT_HOOK)]
+    subprocess.run(["scp", "-q", *files, f"{host}:/tmp/"], check=True)
+
+    installs = "\n".join(f'install_ipk {app} /tmp/{ipk.name}' for app, ipk in ipks.items())
+    script = REMOTE.replace("__INSTALLS__", installs).replace("__SERVICE__", SERVICE)
+    subprocess.run(["ssh", "-T", host, "sh -s"], input=script.encode(), check=True)
+
+
+if __name__ == "__main__":
+    main()

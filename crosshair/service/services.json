@@ -1,0 +1,9 @@
+{
+    "id": "org.abbie.crosshair.service",
+    "description": "Crosshair settings and keep-alive service",
+    "services": [
+        {
+            "name": "org.abbie.crosshair.service"
+        }
+    ]
+}

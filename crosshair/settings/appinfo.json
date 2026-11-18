@@ -1,0 +1,17 @@
+{
+    "id": "org.abbie.crosshair",
+    "version": "0.1.0",
+    "vendor": "Abbie Doobie",
+    "type": "web",
+    "main": "index.html",
+    "title": "Crosshair",
+    "icon": "icon.png",
+    "largeIcon": "largeIcon.png",
+    "resolution": "1920x1080",
+    "defaultWindowType": "overlay",
+    "transparent": true,
+    "noSplashOnLaunch": true,
+    "spinnerOnLaunch": false,
+    "disableBackHistoryAPI": true,
+    "requiredACG": []
+}
