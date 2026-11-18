@@ -43,12 +43,10 @@ button you want (the MR22 Magic Remote's Alexa button is `1086`). Input Hook rel
 by itself.
 
 ```json
-"<keycode>": {"action": "exec", "command": "luna-send -n 1 luna://org.abbie.crosshair.service/button '{}' >/dev/null 2>&1 &"}
+"<keycode>": {"action": "exec", "command": "luna-send -n 1 luna://org.abbie.crosshair.service/button '{}'"}
 ```
 
-Keep the `>/dev/null 2>&1 &`. Input Hook waits for each command to finish before it handles
-the next key, so without it a slow `luna-send` (common just after boot) makes presses pile up
-and arrive together, which looks like a triple press.
+Don't end the command with `&`: Input Hook then never runs it.
 
 ## Options
 
