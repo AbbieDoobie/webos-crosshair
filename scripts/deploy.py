@@ -26,20 +26,36 @@ REMOTE = r"""
 set -e
 HBC=/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service
 
-install_ipk() {
+install_once() {
     id="$1"; ipk="$2"; log="/tmp/crosshair-install-$id.log"
     luna-send -i luna://com.webos.appInstallService/dev/install \
         "{\"id\":\"$id\",\"ipkUrl\":\"$ipk\",\"subscribe\":true}" > "$log" 2>&1 &
     pid=$!
     i=0
     while [ $i -lt 120 ]; do
-        if grep -q '"state":"installed"' "$log"; then kill $pid 2>/dev/null || true; echo "installed $id"; return 0; fi
+        if grep -q '"state":"installed"' "$log"; then kill $pid 2>/dev/null || true; return 0; fi
         if grep -qE 'install failed|"returnValue":false' "$log"; then
             kill $pid 2>/dev/null || true; echo "FAILED $id:"; cat "$log"; return 1
         fi
         sleep 1; i=$((i + 1))
     done
     kill $pid 2>/dev/null || true; echo "TIMEOUT installing $id"; return 1
+}
+
+# The install service has once reported "installed" while leaving the old version in
+# place, so check the version on disk and try once more if it's wrong.
+install_ipk() {
+    id="$1"; ipk="$2"; want="$3"
+    appinfo="/media/developer/apps/usr/palm/applications/$id/appinfo.json"
+    for attempt in 1 2; do
+        install_once "$id" "$ipk" || return 1
+        sleep 1
+        if grep -q "\"version\": *\"$want\"" "$appinfo" 2>/dev/null; then
+            echo "installed $id $want"; return 0
+        fi
+        echo "WARN $id still not at $want after install attempt $attempt"
+    done
+    echo "FAILED $id: installed version is not $want"; return 1
 }
 
 # This script arrives on stdin, so `pkill -f` can't match the shell running it.
@@ -86,7 +102,9 @@ def main() -> None:
     files = [str(p) for p in ipks.values()] + [str(BOOT_HOOK), str(INPUTHOOK_HOOK)]
     subprocess.run(["scp", "-q", *files, f"{host}:/tmp/"], check=True)
 
-    installs = "\n".join(f'install_ipk {app} /tmp/{ipk.name}' for app, ipk in ipks.items())
+    # IPK names are <id>_<version>_all.ipk.
+    installs = "\n".join(f'install_ipk {app} /tmp/{ipk.name} {ipk.name.split("_")[1]}'
+                         for app, ipk in ipks.items())
     script = REMOTE.replace("__INSTALLS__", installs).replace("__SERVICE__", SERVICE)
     subprocess.run(["ssh", "-T", host, "sh -s"], input=script.encode(), check=True)
 

@@ -9,8 +9,11 @@
  *   getConfig {subscribe}   current settings and whether the picture is HDR; with
  *                           subscribe, a reply after every change to either
  *   setConfig {config}      apply a partial settings object; invalid fields are ignored
- *   resetConfig             defaults, keeping on/off and auto-start as they are
+ *   resetConfig             defaults for the look, keeping on/off, auto-start, and the
+ *                           triple-press setting as they are
  *   show / hide / toggle    turn the crosshair on or off
+ *   button                  the remote button (Input Hook calls this): one press toggles;
+ *                           with tripleOpensSettings, three quick presses open the panel
  *   status                  settings plus whether the dot app is loaded, and the power state
  *   start                   no-op; the boot hook calls it to start the service
  *
@@ -26,6 +29,7 @@ var Config = require('./config.js');
 
 var SERVICE_ID = 'org.abbie.crosshair.service';
 var DOT_APP_ID = 'org.abbie.crosshair.dot';
+var SETTINGS_APP_ID = 'org.abbie.crosshair';
 var CONFIG_DIR = '/home/root/.config/org.abbie.crosshair';
 var CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 var LOG_FILE = '/tmp/org.abbie.crosshair.log';
@@ -38,6 +42,9 @@ var SAVE_DELAY_MS = 750;        // settings changes arrive in bursts while a val
 var WAKE_DELAY_MS = 1500;       // let the compositor settle after the screen comes on
 var LAUNCH_WINDOW_MS = 60000;   // relaunch budget: at most LAUNCH_BUDGET per window
 var LAUNCH_BUDGET = 5;
+// Presses count as one gesture while each comes within PRESS_GAP_MS of the one before.
+// Input Hook starts a luna-send per press, which adds about 0.1 s, so this is generous.
+var PRESS_GAP_MS = 600;
 
 var service = new Service(SERVICE_ID);
 var config = loadConfig();
@@ -52,6 +59,8 @@ var hdr = false;                // the TV is showing an HDR picture (picks hdrBr
 var dynamicRange = '';
 var launchTimes = [];
 var launchPending = false;
+var pressCount = 0;
+var pressTimer = null;
 
 // ---------------------------------------------------------------------------------------
 // Logging: a short file in /tmp (cleared every boot), trimmed when it grows.
@@ -164,12 +173,14 @@ function ensureDot(reason, force) {
             launchPending = false;
             if (!reply.payload.returnValue) {
                 log('ERROR', 'launch failed: ' + (reply.payload.errorText || 'unknown'));
+            } else if (!config.visible) {
+                closeDot(true);     // turned off again while it was launching
             }
         });
 }
 
-function closeDot() {
-    if (dotRunning === false) return;
+function closeDot(force) {
+    if (dotRunning === false && !launchPending && !force) return;
     log('INFO', 'closing dot app');
     service.call('luna://com.webos.applicationManager/closeByAppId', { id: DOT_APP_ID },
         function () {});
@@ -184,6 +195,7 @@ function watchRunningApps() {
         if (running !== dotRunning) {
             dotRunning = running;
             if (!running) ensureDot('dot app not running', false);
+            else if (!config.visible) closeDot(true);
         }
     });
     sub.on('cancel', function () {
@@ -242,14 +254,50 @@ service.register('setConfig', function (msg) {
 });
 
 service.register('resetConfig', function (msg) {
-    applyConfig(Config.merge(Config.DEFAULTS,
-        { visible: config.visible, autoStart: config.autoStart }));
+    applyConfig(Config.merge(Config.DEFAULTS, {
+        visible: config.visible, autoStart: config.autoStart,
+        tripleOpensSettings: config.tripleOpensSettings
+    }));
     msg.respond({ config: config });
 });
 
 service.register('show', function (msg) { setVisible(msg, true); });
 service.register('hide', function (msg) { setVisible(msg, false); });
 service.register('toggle', function (msg) { setVisible(msg, !config.visible); });
+
+// The remote button. The first press toggles at once, so a single press feels instant. A
+// second quick press is held back: on its own it toggles back once the gesture ends, so
+// two presses still leave things as they were. A third quick press undoes the first
+// toggle and opens the settings panel instead.
+service.register('button', function (msg) {
+    msg.respond({ returnValue: true });
+    if (!config.tripleOpensSettings) {
+        applyConfig(Config.merge(config, { visible: !config.visible }));
+        return;
+    }
+    pressCount++;
+    if (pressTimer) clearTimeout(pressTimer);
+    if (pressCount === 1) {
+        applyConfig(Config.merge(config, { visible: !config.visible }));
+    } else if (pressCount === 3) {
+        pressCount = 0;
+        pressTimer = null;
+        log('INFO', 'triple press: opening settings');
+        applyConfig(Config.merge(config, { visible: !config.visible }));
+        service.call('luna://com.webos.applicationManager/launch', { id: SETTINGS_APP_ID },
+            function (reply) {
+                if (!reply.payload.returnValue) {
+                    log('ERROR', 'settings launch failed: ' + (reply.payload.errorText || 'unknown'));
+                }
+            });
+        return;
+    }
+    pressTimer = setTimeout(function () {
+        if (pressCount === 2) applyConfig(Config.merge(config, { visible: !config.visible }));
+        pressCount = 0;
+        pressTimer = null;
+    }, PRESS_GAP_MS);
+});
 
 service.register('status', function (msg) {
     msg.respond({

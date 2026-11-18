@@ -78,10 +78,12 @@
     // `visible` is the on/off switch. `autoStart` decides what it is after the TV powers on
     // (boot, or wake from standby): on if true, off if false. `brightness` applies to SDR
     // pictures and `hdrBrightness` to HDR ones, because the TV draws app graphics far
-    // brighter while it shows HDR.
+    // brighter while it shows HDR. `tripleOpensSettings` makes three quick presses of the
+    // remote button open the settings panel (one press still turns the crosshair on or off).
     var DEFAULTS = {
         visible: false,
         autoStart: false,
+        tripleOpensSettings: true,
         shape: 'dot',
         color: '#00ff00',
         opacity: 1,
@@ -97,7 +99,7 @@
         offsetY: 0
     };
 
-    var BOOLS = ['visible', 'autoStart', 'outline'];
+    var BOOLS = ['visible', 'autoStart', 'tripleOpensSettings', 'outline'];
 
     function clampNumber(key, value) {
         var spec = NUMBERS[key];

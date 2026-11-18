@@ -35,14 +35,15 @@ itself after the screen sleeps.
 
 `scripts/deploy.py` does all three over SSH.
 
-### Toggle button (LG Input Hook)
+### Remote button (LG Input Hook)
 
-Add an entry to `/home/root/.config/lginputhook/keybinds.json`, using the key code of the
+One press turns the crosshair on or off. Three quick presses open the settings panel; turn
+off **Triple press opens settings** to make every press a plain toggle. Add an entry to `/home/root/.config/lginputhook/keybinds.json`, using the key code of the
 button you want (the MR22 Magic Remote's Alexa button is `1086`). Input Hook reloads the file
 by itself.
 
 ```json
-"<keycode>": {"action": "exec", "command": "luna-send -n 1 luna://org.abbie.crosshair.service/toggle '{}'"}
+"<keycode>": {"action": "exec", "command": "luna-send -n 1 luna://org.abbie.crosshair.service/button '{}'"}
 ```
 
 ## Options
@@ -51,6 +52,7 @@ by itself.
 |---|---|---|
 | Crosshair | On / Off | Off |
 | Auto-start with TV | On / Off: on after every boot or wake from standby | Off |
+| Triple press opens settings | On / Off: three quick presses of the remote button open this panel | On |
 | Shape | Dot, Circle, Circle + dot, Broken circle, Cross, Cross + dot, T, T + dot, X, X + dot, Scope, Horizontal line, Square, Square + dot, Diamond, Diamond + dot, Corner brackets, Chevron, Triangle, Four dots, Five dots | Dot |
 | Size | 2 to 96 | 8 |
 | Thickness | 1 to 8 (shapes with lines) | 2 |
@@ -110,7 +112,8 @@ python scripts/deploy.py <ssh-host>
 
 Service API, at `luna://org.abbie.crosshair.service/`: `getConfig` (subscribable; also
 reports whether the picture is HDR),
-`setConfig {config}`, `resetConfig`, `show`, `hide`, `toggle`, `status`, and `start`.
+`setConfig {config}`, `resetConfig`, `show`, `hide`, `toggle`,
+`button` (one press toggles; three quick presses open the settings), `status`, and `start`.
 
 Settings live in `/home/root/.config/org.abbie.crosshair/config.json`. The service log is
 `/tmp/org.abbie.crosshair.log`.
