@@ -7,7 +7,8 @@ The TV needs root SSH from the Homebrew Channel. Run scripts/build.py first.
 
 Steps, all on the TV: install both IPKs, elevate the service to root with the Homebrew
 Channel's elevate-service, put the boot hook in /var/lib/webosbrew/init.d, restart the
-service, and reload the dot app so it runs the new code.
+service, and reload the dot app so it runs the new code. If LG Input Hook is installed, also
+put in extras/inputhook-autostart/96-inputhook-autostart, which keeps its autostart working.
 """
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
 BOOT_HOOK = ROOT / "crosshair" / "boot" / "95-abbie-crosshair"
+INPUTHOOK_HOOK = ROOT / "extras" / "inputhook-autostart" / "96-inputhook-autostart"
 
 APPS = ["org.abbie.crosshair.dot", "org.abbie.crosshair"]
 SERVICE = "org.abbie.crosshair.service"
@@ -53,11 +55,19 @@ cp /tmp/95-abbie-crosshair /var/lib/webosbrew/init.d/95-abbie-crosshair
 chmod 755 /var/lib/webosbrew/init.d/95-abbie-crosshair
 echo "boot hook installed"
 
+if [ -d /media/developer/apps/usr/palm/services/org.webosbrew.inputhook.service ]; then
+    cp /tmp/96-inputhook-autostart /var/lib/webosbrew/init.d/96-inputhook-autostart
+    chmod 755 /var/lib/webosbrew/init.d/96-inputhook-autostart
+    echo "Input Hook autostart script installed"
+else
+    echo "Input Hook not installed; skipped its autostart script"
+fi
+
 pkill -f "__SERVICE__" 2>/dev/null || true
 sleep 1
 luna-send -n 1 luna://__SERVICE__/start '{}'
 echo
-rm -f /tmp/org.abbie.crosshair*.ipk /tmp/95-abbie-crosshair
+rm -f /tmp/org.abbie.crosshair*.ipk /tmp/95-abbie-crosshair /tmp/96-inputhook-autostart
 """
 
 
@@ -73,7 +83,7 @@ def main() -> None:
             sys.exit(f"no IPK for {app} in build/; run scripts/build.py first")
         ipks[app] = found[-1]
 
-    files = [str(p) for p in ipks.values()] + [str(BOOT_HOOK)]
+    files = [str(p) for p in ipks.values()] + [str(BOOT_HOOK), str(INPUTHOOK_HOOK)]
     subprocess.run(["scp", "-q", *files, f"{host}:/tmp/"], check=True)
 
     installs = "\n".join(f'install_ipk {app} /tmp/{ipk.name}' for app, ipk in ipks.items())
