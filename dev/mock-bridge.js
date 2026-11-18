@@ -1,13 +1,14 @@
 /*
  * Development stand-in for webOS's PalmServiceBridge, emulating the crosshair service in
  * memory so the settings panel runs in a desktop browser. Add ?hdr=1 to the page URL to
- * pretend the TV is showing HDR.
+ * pretend the TV is showing HDR, and ?root=0 to pretend the service isn't elevated.
  */
 (function () {
     'use strict';
 
     var config = CrosshairConfig.merge(CrosshairConfig.DEFAULTS, {});
     var hdr = /[?&]hdr=1/.test(location.search);
+    var elevated = !/[?&]root=0/.test(location.search);
     var subscribers = [];
 
     function reply(bridge, payload) {
@@ -15,7 +16,7 @@
     }
 
     function broadcast() {
-        subscribers.forEach(function (b) { reply(b, { config: config, hdr: hdr, subscribed: true }); });
+        subscribers.forEach(function (b) { reply(b, { config: config, hdr: hdr, elevated: elevated, subscribed: true }); });
     }
 
     window.PalmServiceBridge = function () {};
@@ -24,7 +25,7 @@
         var method = uri.split('/').pop();
         if (method === 'getConfig') {
             if (args.subscribe) subscribers.push(this);
-            reply(this, { config: config, hdr: hdr, subscribed: !!args.subscribe, returnValue: true });
+            reply(this, { config: config, hdr: hdr, elevated: elevated, subscribed: !!args.subscribe, returnValue: true });
         } else if (method === 'setConfig') {
             config = CrosshairConfig.merge(config, args.config);
             reply(this, { config: config, returnValue: true });

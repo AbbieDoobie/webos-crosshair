@@ -6,8 +6,9 @@
  * settings for HDR), and does nothing between events.
  *
  * Methods (luna://org.abbie.crosshair.service/<method>):
- *   getConfig {subscribe}   current settings and whether the picture is HDR; with
- *                           subscribe, a reply after every change to either
+ *   getConfig {subscribe}   current settings, whether the picture is HDR, and whether
+ *                           the service runs as root; with subscribe, a reply after
+ *                           every change
  *   setConfig {config}      apply a partial settings object; invalid fields are ignored
  *   resetConfig             defaults for the look, keeping on/off, auto-start, and the
  *                           triple-press setting as they are
@@ -59,6 +60,9 @@ var hdr = false;                // the TV is showing an HDR picture (picks hdrBr
 var dynamicRange = '';
 var launchTimes = [];
 var launchPending = false;
+// Root comes from Homebrew Channel's elevate-service. Without it the service can't keep
+// settings in /home/root, so the settings panel warns.
+var elevated = typeof process.getuid === 'function' && process.getuid() === 0;
 var pressCount = 0;
 var pressTimer = null;
 
@@ -117,7 +121,7 @@ function applyConfig(next) {
 
 function broadcast() {
     configSubscribers.forEach(function (msg) {
-        msg.respond({ config: config, hdr: hdr, subscribed: true });
+        msg.respond({ config: config, hdr: hdr, elevated: elevated, subscribed: true });
     });
 }
 
@@ -237,7 +241,7 @@ function setVisible(msg, visible) {
 
 service.register('getConfig', function (msg) {
     if (msg.isSubscription) configSubscribers.push(msg);
-    msg.respond({ config: config, hdr: hdr, subscribed: !!msg.isSubscription });
+    msg.respond({ config: config, hdr: hdr, elevated: elevated, subscribed: !!msg.isSubscription });
 }, function (msg) {
     var i = configSubscribers.indexOf(msg);
     if (i >= 0) configSubscribers.splice(i, 1);
@@ -276,6 +280,7 @@ service.register('button', function (msg) {
         return;
     }
     pressCount++;
+    log('INFO', 'button press ' + pressCount);
     if (pressTimer) clearTimeout(pressTimer);
     if (pressCount === 1) {
         applyConfig(Config.merge(config, { visible: !config.visible }));
@@ -302,7 +307,7 @@ service.register('button', function (msg) {
 service.register('status', function (msg) {
     msg.respond({
         config: config, dotLoaded: dotRunning === true, powerState: powerState,
-        hdr: hdr, dynamicRange: dynamicRange
+        hdr: hdr, dynamicRange: dynamicRange, elevated: elevated
     });
 });
 
@@ -328,7 +333,7 @@ function applyPowerOnRule(reason) {
     applyConfig(Config.merge(config, { visible: config.autoStart }));
 }
 
-log('INFO', 'service started');
+log('INFO', 'service started' + (elevated ? '' : ' WITHOUT ROOT (not elevated)'));
 if (!fs.existsSync(BOOT_MARKER)) {
     try { fs.writeFileSync(BOOT_MARKER, ''); } catch (e) { /* worst case: rule runs again */ }
     applyPowerOnRule('boot');

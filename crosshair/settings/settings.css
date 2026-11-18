@@ -148,6 +148,26 @@ html, body {
     background: rgba(255, 255, 255, 0.12);
 }
 
+#warning {
+    margin: 0 32px 16px;
+    padding: 12px 16px;
+    border-radius: 10px;
+    background: rgba(255, 179, 0, 0.16);
+    border-left: 6px solid #ffb300;
+    color: #ffd54f;
+    font-size: 20px;
+    line-height: 1.35;
+}
+
+#warning[hidden] {
+    display: none;
+}
+
+/* Keep the whole panel on screen with the warning showing. */
+#warning:not([hidden]) ~ #rows {
+    max-height: 700px;
+}
+
 #message {
     min-height: 0;
     padding: 0 32px;

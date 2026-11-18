@@ -31,6 +31,7 @@
 
     var rowsEl = document.getElementById('rows');
     var messageEl = document.getElementById('message');
+    var warningEl = document.getElementById('warning');
     var previewEl = document.getElementById('preview');
 
     function uses(control) {
@@ -168,6 +169,18 @@
 
     function showMessage(text) {
         messageEl.textContent = text || '';
+    }
+
+    // The service answers but isn't root: settings won't be kept, and the crosshair won't
+    // follow the TV's power state reliably.
+    function showElevationWarning(show) {
+        if (!warningEl || warningEl.hidden === !show) return;
+        warningEl.hidden = !show;
+        warningEl.textContent = show
+            ? 'The service isn’t running as root, so settings may not be kept. ' +
+              'On the TV, run elevate-service org.abbie.crosshair.service, then reboot.'
+            : '';
+        updateScrollFade();
     }
 
     function valueText(row) {
@@ -360,6 +373,7 @@
             return;
         }
         showMessage('');
+        showElevationWarning(reply.elevated === false);
         if (typeof reply.hdr === 'boolean' && reply.hdr !== hdr) {
             hdr = reply.hdr;
             if (config) render();
