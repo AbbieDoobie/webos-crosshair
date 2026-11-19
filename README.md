@@ -229,7 +229,7 @@ Run on the TV over SSH (`ssh -tt`, so `luna-send` prints its replies):
 | `crosshair/app/` | The floating app: the crosshair and the settings panel |
 | `crosshair/native/` | The root service (C) |
 | `crosshair/shared/` | `config.js` (settings schema and validation), `render.js` (drawing), and `luna.js` (bus client), copied into the app |
-| `assets/` | The store icon |
+| `assets/` | The store icon and screenshots, linked from the Homebrew Channel listing |
 | `scripts/` | `build.py`, `deploy.py`, `icons.py` (launcher icons), and the service build scripts |
 | `scripts/tv/` | Scripts to run on the TV |
 | `dev/` | Desktop previews |
