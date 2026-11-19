@@ -1,130 +1,221 @@
-# Crosshair for LG webOS TVs
+# Crosshair (LG webOS TVs)
 
-A crosshair over whatever the TV is showing, for games on an HDMI input. It sits above the
-picture without taking the remote, stays up through long play sessions, and comes back by
-itself after the screen sleeps.
+A crosshair on top of whatever your TV is showing, for games on an HDMI input. Pick a shape, color, and size, and it just sits there over the picture without taking the remote away from you.
+
+Made for console and PC games that don't have a crosshair of their own (or only show one while aiming). Game Optimizer, VRR, ALLM, and HDR all stay on with it up, and by default it gets out of the way by itself when you go to Home or open an app.
+
+**Needs a rooted LG TV with the Homebrew Channel.** Tested on an OLED C2 running webOS 10.3.1, so other models and versions may work, but I cannot promise anything there!
+
+- [Features](#features)
+- [Initial Setup](#initial-setup)
+- [Remote Button Setup (LG Input Hook)](#remote-button-setup-lg-input-hook)
+- [Options](#options)
+- [Technical Stuff and Limitations](#technical-stuff-and-limitations)
+- [Building](#building)
+- [License](#license)
 
 ## Features
 
-- 21 shapes: dots, circles, crosses, T, X, scope, squares, diamonds, corner brackets, a
-  chevron, a triangle, and dot patterns.
-- Color presets or any hue, size, thickness, gap, opacity, and an optional outline.
-- Separate brightness for SDR and HDR, switched automatically: the TV draws app graphics much
-  brighter over HDR games.
-- Move it anywhere on screen for games whose aim point isn't the exact center. Hold Left or
-  Right in the settings to move faster.
-- On-TV settings: open **Crosshair** from the app list. An on/off switch sits at the top.
-  While the crosshair is off, selecting a look setting previews it in place. While it's on,
-  changes show live on the real one.
-- Toggle it with a remote button through LG Input Hook.
-- Off by default. **Auto-start with TV** (also off by default) turns it on whenever the TV
-  powers on. Settings survive reboots.
+| What you do | What happens |
+|---|---|
+| Open **Crosshair** from the app list | The settings panel opens over the game |
+| Change a look setting while the crosshair is on | The real crosshair updates live |
+| Select a look setting while the crosshair is off | A preview shows exactly where the real one would go |
+| Press your remote button once **(if set up)** | Crosshair turns on or off |
+| Press it three times quickly **(if set up)** | Settings panel opens, crosshair stays how it was |
+| Go to Home or open an app | Crosshair hides, and comes back when you return to an input **(if enabled)** |
+| Turn the TV on | Crosshair comes on by itself **(if auto-start is enabled)** |
 
-## Setup
+- 21 shapes: dots, circles, crosses, T, X, scope, squares, diamonds, corner brackets, a chevron, a triangle, and dot patterns.
+- 11 color presets, or any hue you want.
+- Separate brightness for HDR, picked automatically (the TV draws app graphics a LOT brighter over HDR).
+- Move it anywhere on screen, for games whose aim point isn't dead center.
+- Settings are kept through reboots.
 
-1. Install both packages: `org.abbie.crosshair_<version>_all.ipk` (settings and service) and
-   `org.abbie.crosshair.dot_<version>_all.ipk` (the crosshair itself).
-2. The service needs root. Elevate it once after every install:
+## Initial Setup
 
-   ```
+1. Install both packages: `org.abbie.crosshair_<version>_all.ipk` (settings and service) and `org.abbie.crosshair.dot_<version>_all.ipk` (the crosshair itself).
+2. Elevate the service to root. This is needed once after every install:
+
+   ```sh
    /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/elevate-service org.abbie.crosshair.service
    ```
 
-3. Copy `crosshair/boot/95-abbie-crosshair` to `/var/lib/webosbrew/init.d/` so the crosshair
-   comes back after a reboot.
+3. Copy `crosshair/boot/95-abbie-crosshair` to `/var/lib/webosbrew/init.d/` and make it executable, so the service starts at boot.
+4. Open **Crosshair** from the app list and turn it on.
 
-`scripts/deploy.py` does all three over SSH.
+`scripts/deploy.py` does steps 1 to 3 over SSH (see [Building](#building)). If the settings panel shows an amber warning under the title, the service isn't running as root; redo step 2 and reboot.
 
-### Remote button (LG Input Hook)
+## Remote Button Setup (LG Input Hook)
 
-One press turns the crosshair on or off. Three quick presses open the settings panel; turn
-off **Triple press opens settings** to make every press a plain toggle.
+LG Input Hook (`org.webosbrew.inputhook`, available in the Homebrew Channel) can run a command when a remote button is pressed. Bind any button you like to the crosshair's `button` method for one-press on/off and, if enabled, triple-press settings.
 
-Add an entry to `/home/root/.config/lginputhook/keybinds.json`, using the key code of the
-button you want (the MR22 Magic Remote's Alexa button is `1086`). Input Hook reloads the file
-by itself.
+1. Open **LG Input Hook** and press the button you want to use. Input Hook shows its key code.
+2. Choose **Add keybind** and enter that key code in **ID**.
+3. Set **Action** to **Execute**, and paste this into **Command**:
 
-```json
-"<keycode>": {"action": "exec", "command": "luna-send -n 1 luna://org.abbie.crosshair.service/button '{}'"}
-```
+   ```
+   luna-send -n 1 luna://org.abbie.crosshair.service/button '{}'
+   ```
 
-Don't end the command with `&`: Input Hook then never runs it.
+4. Choose **Save changes**, then press the button once to check that the crosshair turns on or off.
+
+Notes:
+
+- **Use `button`, not `toggle`.** `button` handles both modes: with **Triple press opens settings** off, every press is a plain toggle, so it behaves exactly like `toggle`. `show`, `hide`, and `toggle` remain available if you want separate buttons for them.
+- **Don't add `&` to the end of the command.** Input Hook never runs a backgrounded command.
+- **Pick a button that isn't bound to anything else** in Input Hook.
+- **Keep Input Hook's autostart reliable.** Input Hook's own boot script can remove itself after one failed start, and its hook only attaches if `lginput2` is already running. `scripts/deploy.py` installs `extras/inputhook-autostart/96-inputhook-autostart` when Input Hook is present, which checks the hook after boot and restarts Input Hook if needed (3 times at most). `scripts/tv/status.sh` shows whether `lginput2` is hooked.
+- Presses count as one gesture while each comes within 600 ms of the one before. The first press toggles right away; a second is held back and undone when the gesture ends (so two presses leave things as they were); a third undoes the first and opens the settings panel. Each press is logged in `/tmp/org.abbie.crosshair.log` as `button press <n>`.
 
 ## Options
 
-| Setting | Range | Default |
-|---|---|---|
-| Crosshair | On / Off | Off |
-| Auto-start with TV | On / Off: on after every boot or wake from standby | Off |
-| Triple press opens settings | On / Off: three quick presses of the remote button open this panel | On |
-| Hide on Home and apps | On / Off: hidden while Home or an app is in front; back on an input (HDMI, live TV, AV) | On |
-| Shape | Dot, Circle, Circle + dot, Broken circle, Cross, Cross + dot, T, T + dot, X, X + dot, Scope, Horizontal line, Square, Square + dot, Diamond, Diamond + dot, Corner brackets, Chevron, Triangle, Four dots, Five dots | Dot |
-| Size | 2 to 96 | 8 |
-| Thickness | 1 to 8 (shapes with lines) | 2 |
-| Gap | 0 to 32 (shapes with a gap) | 3 |
-| Color | Green, Lime, Yellow, Orange, Red, Pink, Magenta, Purple, Blue, Cyan, White | Green |
-| Custom color | Any hue, in 5-degree steps | |
-| Brightness | 10% to 100%, used for SDR pictures | 100% |
-| HDR brightness | 10% to 100%, used while the TV shows HDR | 70% |
-| Opacity | 10% to 100% | 100% |
-| Outline | On / Off, Black or White, width 1 to 3 | Off |
-| Move left / right | -900 to 900 | 0 |
-| Move up / down | -500 to 500 | 0 |
-| Center it | Puts it back in the middle | |
+Up/Down picks a row, Left/Right changes it (hold to speed up on long ranges), OK toggles or runs it, and Back closes the panel. The Magic Remote pointer works too: click a row's arrows, a switch, or the row itself. Rows that don't apply to the current shape (or to an outline that's off) are hidden.
 
-Sizes are in 1080p pixels: the TV draws app graphics at 1080p, so on a 4K panel each one is
-a 2x2 block of physical pixels.
+### On / off
 
-Brightness gives an opaque, darker shade of the color. Opacity lets the game show through it.
+**Crosshair** turns it on or off. **Off by default.**
+
+**Auto-start with TV** decides what happens when the TV powers on (a boot, or waking from standby): on if enabled, off if not. The dim "Screen Off" state doesn't count as powering on, so the crosshair just comes back how it was. **Off by default.**
+
+**Triple press opens settings** makes three quick presses of your remote button open this panel. One press still turns the crosshair on or off. Turn it off to make every press a plain toggle. **On by default.**
+
+**Hide on Home and apps** hides the crosshair while Home or an app is in front, and brings it back when you return to an input (HDMI, live TV, or AV). The picture menus and quick settings over an input keep it up. This doesn't change the on/off setting, it only hides it. **On by default.**
+
+### Shape
+
+**Shape** picks one of the 21 shapes. **Dot by default.**
+
+**Size** is 2 to 96. **8 by default.**
+
+**Thickness** is 1 to 8, for shapes with lines or rings. **2 by default.**
+
+**Gap** is 0 to 32, the empty space in the middle of crosses, Xs, and the like. **3 by default.**
+
+### Color
+
+**Color** picks one of the presets: Green, Lime, Yellow, Orange, Red, Pink, Magenta, Purple, Blue, Cyan, or White. **Green by default.**
+
+**Custom color** sets any hue, in 5-degree steps.
+
+**Brightness** is 10% to 100%, used while the TV shows a normal (SDR) picture. It gives a darker shade of the color that's still fully solid. **100% by default.**
+
+**HDR brightness** is the same thing, used while the TV shows HDR. The TV draws app graphics far brighter over HDR, so this one starts lower. The panel tags whichever brightness is in use right now. **70% by default.**
+
+**Opacity** is 10% to 100%, and lets the game show through the crosshair. **100% by default.**
+
+### Outline
+
+**Outline** draws a border around every part of the crosshair, which helps on busy backgrounds. **Off by default.**
+
+**Outline color** is Black or White. **Black by default.**
+
+**Outline width** is 1 to 3. **1 by default.**
+
+### Position
+
+**Move left / right** is -900 to 900, and **Move up / down** is -500 to 500. Both are **0 (center) by default.**
+
+**Center it** puts it back in the middle.
+
+**Reset to defaults** resets the look and position, but keeps the on/off, auto-start, triple press, and hide settings how you had them.
 
 ## Technical Stuff and Limitations
 
-- **Needs a rooted TV** with the Homebrew Channel. Tested on an LG OLED C2 running webOS 10.3.1.
-- **Home and apps hide the crosshair.** With **Hide on Home and apps** on (the default), it
-  closes while Home or an app is in front and comes back on an input. With that option off,
-  Home and Back may not work properly while the crosshair is up. The input picker, Game
-  Optimizer, and picture settings work either way.
-- The crosshair is a `floating` window: a compositor layer above the full-screen input,
-  below the TV's own menus. The 2-minute idle timer that closes overlay windows doesn't touch
-  it, and it doesn't take remote focus.
-- The crosshair doesn't change Game Optimizer, ALLM, VRR, HDR, or the refresh rate (checked at
-  4K 120 Hz HDR10; `scripts/tv/gamecheck.sh`).
-- Off closes the crosshair app entirely. On starts it again in about half a second. While
-  on, it costs about 30 MB for the web page, and the service about 21 MB, with no CPU use
-  while idle.
+### How it works
+
+The crosshair is three parts in two packages:
+
+| Part | Package | Role |
+|---|---|---|
+| Service (`org.abbie.crosshair.service`) | `org.abbie.crosshair` | Root JS service. Stores settings, applies the power-on rule, and starts or closes the dot app. |
+| Settings (`org.abbie.crosshair`) | `org.abbie.crosshair` | Overlay web app with the on-TV panel. Takes remote focus while open. |
+| Dot (`org.abbie.crosshair.dot`) | `org.abbie.crosshair.dot` | Transparent `floating` web app that draws the crosshair as SVG. Hidden from the app list. |
+
+- The dot is a `floating` window: a compositor layer above the full-screen input and below the TV's own menus. Unlike overlay windows, it isn't closed by the compositor's 2-minute idle timer and doesn't take remote focus.
+- Off closes the dot app entirely, since a loaded floating window interferes with Home and Back. Turning it on relaunches it in about half a second (the first launch after an install takes several seconds).
+- The service is event driven, with no polling loops. It subscribes to the power state, the running-app list, the foreground app, and the picture settings, and does nothing between events.
+- **Power-on rule.** After a boot or a wake from standby, `visible` is set to `autoStart`. A restart of the service alone (reinstall, crash) keeps the current state; `/tmp/org.abbie.crosshair.booted` marks that the boot already happened.
+- **HDR detection.** The `dynamicRange` dimension of the picture settings (for example `hdrALLM`) selects `hdrBrightness` over `brightness`.
+- **Hide on Home and apps.** The first non-crosshair entry in `getForegroundAppInfo` is the main app. Only `com.webos.app.hdmi*`, `livetv`, and `externalinput.*` count as inputs.
+- The dot app is relaunched automatically if it dies on its own, up to 5 times a minute.
+
+### Measurements (C2, webOS 10.3.1)
+
+- Game Optimizer, ALLM, VRR, HDR, and the refresh rate are unchanged with the crosshair up (checked at 4K 120 Hz HDR10 with `scripts/tv/gamecheck.sh`).
+- About 30 MB for the dot app while on, and about 21 MB for the service. No CPU use while idle.
+- Input lag has not been measured.
+
+### Limitations
+
+- Requires root (Homebrew Channel). Without `elevate-service`, settings may not be kept and the power-on rule may not apply.
+- Only tested on an OLED C2 (OLED42C2PUA) with webOS 10.3.1, firmware 33.31.68.
+- Sizes are in 1080p units. The TV's graphics plane is 1080p, so on a 4K panel each unit is a 2x2 block of physical pixels, and half units can't be drawn.
+- With **Hide on Home and apps** off, Home and Back may not work properly while the crosshair is up.
+- With auto-start on, the first remote button press right after a boot has occasionally been lost.
+
+### Service API
+
+All methods are at `luna://org.abbie.crosshair.service/<method>`.
+
+| Method | Parameters | Description |
+|---|---|---|
+| `getConfig` | `subscribe` (optional) | Current settings, whether the picture is HDR, and whether the service is root. With `subscribe`, a reply after every change. |
+| `setConfig` | `config` | Applies a partial settings object. Invalid fields are skipped and keep their current value. |
+| `resetConfig` | | Restores the default look and position, keeping on/off, auto-start, triple press, and hide. |
+| `show`, `hide`, `toggle` | | Turns the crosshair on or off. |
+| `button` | | Remote button handler for Input Hook (one press toggles, three open the settings if enabled). |
+| `status` | | Settings, whether the dot app is loaded, power state, dynamic range, foreground app, and whether an input is in front. |
+| `start` | | No-op; the boot hook calls it to start the service. |
+
+### Files on the TV
+
+| Path | Contents |
+|---|---|
+| `/home/root/.config/org.abbie.crosshair/config.json` | Saved settings |
+| `/tmp/org.abbie.crosshair.log` | Service log (cleared every boot) |
+| `/var/lib/webosbrew/init.d/95-abbie-crosshair` | Boot hook |
+| `/var/lib/webosbrew/init.d/96-inputhook-autostart` | Input Hook autostart helper (only if Input Hook is installed) |
 
 ## Building
 
-Needs Python 3, Node.js 20 or newer, and LG's CLI (`npm install -g @webos-tools/cli`) with
-`ares-package` on PATH.
+Requirements: Python 3, Node.js 20 or newer, and LG's CLI (`npm install -g @webos-tools/cli`) with `ares-package` on `PATH`.
 
-```
+```sh
 python scripts/build.py
 python scripts/deploy.py <ssh-host>
 ```
 
-`<ssh-host>` is anything ssh accepts: `root@<tv-ip>`, or a Host alias carrying the key.
+`build.py` stages each part with its shared files, generates the icons, and writes both IPKs to `build/`. `deploy.py` copies them to the TV, installs them (checking the installed version and retrying once), elevates the service, installs the boot hook (and the Input Hook autostart helper if Input Hook is present), and restarts the service. `<ssh-host>` is anything `ssh` accepts, such as `root@<tv-ip>` or a Host alias from your SSH config.
 
-| Path | What it is |
+### Development previews
+
+Serve the repository with `python -m http.server` and open:
+
+- `dev/gallery.html`: every shape, drawn by the shipping `render.js` at 4x zoom, plain and outlined.
+- `dev/settings.html`: the real settings panel in a desktop browser, with the service emulated by `dev/mock-bridge.js`. Arrow keys, Enter, and Escape act as the remote. Add `?hdr=1` to pretend the TV is showing HDR, and `?root=0` to pretend the service isn't elevated.
+
+### TV scripts
+
+Run on the TV over SSH (`ssh -tt`, so `luna-send` prints its replies):
+
+- `scripts/tv/status.sh`: one-screen health check for the crosshair and Input Hook. Read-only.
+- `scripts/tv/gamecheck.sh`: prints game mode, ALLM, VRR, HDR, and resolution with the crosshair off, on, and off again. Leaves the crosshair off.
+
+### Project layout
+
+| Path | Contents |
 |---|---|
-| `crosshair/dot/` | `org.abbie.crosshair.dot`: the floating, transparent web app that draws the crosshair (SVG) |
-| `crosshair/settings/` | `org.abbie.crosshair`: the on-TV settings panel (overlay window), and the app-list entry |
-| `crosshair/service/` | `org.abbie.crosshair.service`: root JS service; stores settings, toggles, and starts or closes the dot app |
-| `crosshair/shared/` | `config.js` (settings schema and validation), `render.js` (draws the crosshair), and `luna.js` (bus client), copied into each package |
+| `crosshair/dot/` | The floating dot app |
+| `crosshair/settings/` | The settings panel app |
+| `crosshair/service/` | The root JS service |
+| `crosshair/shared/` | `config.js` (settings schema and validation), `render.js` (drawing), and `luna.js` (bus client), copied into each package |
 | `crosshair/boot/` | Homebrew Channel boot hook |
-| `scripts/` | `build.py`, `deploy.py`, and `icons.py` (generates the launcher icons) |
-| `scripts/tv/` | Run on the TV: `status.sh` (health check) and `gamecheck.sh` (game-mode A/B test) |
-| `dev/` | Desktop previews: `gallery.html` (every shape) and `settings.html` (the panel, with a mock service). Serve the repo with `python -m http.server` |
-| `extras/inputhook-autostart/` | A more reliable boot start for LG Input Hook (see its comments) |
-
-Service API, at `luna://org.abbie.crosshair.service/`: `getConfig` (subscribable; also
-reports whether the picture is HDR),
-`setConfig {config}`, `resetConfig`, `show`, `hide`, `toggle`,
-`button` (one press toggles; three quick presses open the settings), `status`, and `start`.
-
-Settings live in `/home/root/.config/org.abbie.crosshair/config.json`. The service log is
-`/tmp/org.abbie.crosshair.log`.
+| `extras/inputhook-autostart/` | Boot helper that keeps Input Hook's autostart working |
+| `scripts/` | `build.py`, `deploy.py`, and `icons.py` (launcher icons) |
+| `scripts/tv/` | Scripts to run on the TV |
+| `dev/` | Desktop previews |
 
 ## License
 
-MIT.
+MIT
