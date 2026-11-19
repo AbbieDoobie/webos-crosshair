@@ -62,8 +62,7 @@ LG Input Hook (`org.webosbrew.inputhook`, available in the Homebrew Channel) can
 
 Notes:
 
-- **Use `button`, not `toggle`.** `button` handles both modes: with **Triple press opens settings** off, every press is a plain toggle, so it behaves exactly like `toggle`. `show`, `hide`, and `toggle` remain available if you want separate buttons for them.
-- **Don't add `&` to the end of the command.** Input Hook never runs a backgrounded command.
+- The command above handles everything: one press turns the crosshair on or off, and three quick presses open the settings **(if enabled)**. If you'd rather have separate buttons, replace `button` in the command with `show`, `hide`, or `toggle`.
 - **Pick a button that isn't bound to anything else** in Input Hook.
 - Presses count as one gesture while each comes within 600 ms of the one before. The first press toggles right away; a second is held back and undone when the gesture ends (so two presses leave things as they were); a third undoes the first and opens the settings panel. Each press is logged in `/tmp/org.abbie.crosshair.log` as `button press <n>`.
 
