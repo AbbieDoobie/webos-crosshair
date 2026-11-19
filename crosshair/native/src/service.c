@@ -26,6 +26,9 @@
  *
  * With hideOutsideInputs, the dot app is also closed while Home or an app is in front, and
  * comes back on an input (HDMI, live TV, AV). The on/off setting itself doesn't change.
+ *
+ * Crash recovery: the process the hub starts supervises the service in a child process and
+ * restarts it a second after it dies abnormally, up to 5 times a minute (see supervise()).
  */
 #include <ctype.h>
 #include <errno.h>
@@ -36,6 +39,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -72,6 +76,12 @@
 //A press normally reaches the service about 30 ms after lginput2 sees it, so this is generous.
 #define PRESS_GAP_MS 600
 #define RESUBSCRIBE_S 5
+//Crash recovery: restart the service after RESTART_DELAY_S, at most RESTART_BUDGET times
+//in RESTART_WINDOW_S. EXIT_NO_RESTART means a restart can't help (setup failed).
+#define RESTART_DELAY_S 1
+#define RESTART_WINDOW_S 60
+#define RESTART_BUDGET 5
+#define EXIT_NO_RESTART 3
 
 #define JSON_MAX 4096
 
@@ -820,7 +830,7 @@ static bool fail(const char *what, LSError *err)
     return false;
 }
 
-int main(void)
+static int service_main(void)
 {
     LSError err;
     LSErrorInit(&err);
@@ -828,10 +838,14 @@ int main(void)
     load_config();
 
     loop = g_main_loop_new(NULL, FALSE);
-    if (!LSRegister(SERVICE_ID, &sh, &err)) return fail("register", &err), 1;
-    if (!LSRegisterCategory(sh, "/", methods, NULL, NULL, &err)) return fail("register methods", &err), 1;
+    //A failed setup won't fix itself on a retry (most often another copy already owns the
+    //bus name), so these exit with EXIT_NO_RESTART and the supervisor stops too.
+    if (!LSRegister(SERVICE_ID, &sh, &err)) return fail("register", &err), EXIT_NO_RESTART;
+    if (!LSRegisterCategory(sh, "/", methods, NULL, NULL, &err)) {
+        return fail("register methods", &err), EXIT_NO_RESTART;
+    }
     if (!LSSubscriptionSetCancelFunction(sh, subscription_cancel_cb, NULL, &err)) fail("cancel hook", &err);
-    if (!LSGmainAttach(sh, loop, &err)) return fail("attach main loop", &err), 1;
+    if (!LSGmainAttach(sh, loop, &err)) return fail("attach main loop", &err), EXIT_NO_RESTART;
     g_unix_signal_add(SIGTERM, on_term, NULL);
     g_unix_signal_add(SIGINT, on_term, NULL);
 
@@ -850,4 +864,82 @@ int main(void)
     g_main_loop_unref(loop);
     if (log_fp) fclose(log_fp);
     return 0;
+}
+
+//---------------------------------------------------------------------------------------
+//Crash recovery. The process the hub starts is a small supervisor that runs the service
+//in a child and starts it again if it dies abnormally (crash, abort, or kill), so the
+//crosshair keeps following power, Home, and the button without waiting for the next call
+//to wake the hub. The child holds all the state and the bus connection; the supervisor
+//only waits.
+
+static volatile sig_atomic_t stop_requested;
+static volatile pid_t child_pid;
+
+//Pass a stop on to the service, and don't restart it afterwards
+static void supervisor_signal(int sig)
+{
+    stop_requested = 1;
+    if (child_pid > 0) kill(child_pid, sig);
+}
+
+static int supervise(void)
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = supervisor_signal;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
+
+    gint64 starts[RESTART_BUDGET];
+    int count = 0;
+    for (;;) {
+        //Failsafe: a service that keeps crashing (say, right at startup) gives up instead
+        //of looping forever. The next call to it starts a fresh supervisor.
+        gint64 now = g_get_monotonic_time() / G_USEC_PER_SEC;
+        int kept = 0;
+        for (int i = 0; i < count; i++) {
+            if (now - starts[i] < RESTART_WINDOW_S) starts[kept++] = starts[i];
+        }
+        count = kept;
+        if (count >= RESTART_BUDGET) {
+            log_line("ERROR", "service died %d times in %d s, giving up", RESTART_BUDGET, RESTART_WINDOW_S);
+            return 1;
+        }
+        starts[count++] = now;
+
+        pid_t pid = fork();
+        if (pid < 0) {
+            log_line("ERROR", "can't start the service: %s", strerror(errno));
+            return 1;
+        }
+        if (pid == 0) {
+            signal(SIGTERM, SIG_DFL);
+            signal(SIGINT, SIG_DFL);
+            _exit(service_main());
+        }
+        child_pid = pid;
+
+        int status;
+        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+        child_pid = 0;
+        log_size = -1;      //The service wrote to the log meanwhile, so measure it again
+        if (stop_requested) return 0;
+        if (WIFEXITED(status)) {
+            int code = WEXITSTATUS(status);
+            if (code == 0 || code == EXIT_NO_RESTART) return code;
+            log_line("WARN", "service exited with code %d, restarting", code);
+        } else if (WIFSIGNALED(status)) {
+            log_line("WARN", "service crashed (signal %d), restarting", WTERMSIG(status));
+        }
+        //Let the hub notice the old connection is gone before the new one registers
+        sleep(RESTART_DELAY_S);
+        if (stop_requested) return 0;
+    }
+}
+
+int main(void)
+{
+    return supervise();
 }

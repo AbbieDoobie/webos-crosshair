@@ -138,6 +138,7 @@ The crosshair is three parts in two packages:
 - **HDR detection.** The `dynamicRange` dimension of the picture settings (for example `hdrALLM`) selects `hdrBrightness` over `brightness`.
 - **Hide on Home and apps.** The first non-crosshair entry in `getForegroundAppInfo` is the main app. Only `com.webos.app.hdmi*`, `livetv`, and `externalinput.*` count as inputs.
 - The dot app is relaunched automatically if it dies on its own, up to 5 times a minute.
+- **Crash recovery (native service).** The process the hub starts is a small supervisor that runs the service in a child process. If the service crashes or is killed, the supervisor starts it again a second later, up to 5 times a minute; a normal stop isn't restarted. The supervisor takes about 0.15 MB.
 
 ### Measurements (C2, webOS 10.3.1)
 
