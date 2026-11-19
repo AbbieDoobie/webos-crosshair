@@ -198,7 +198,7 @@ python scripts/build.py
 python scripts/deploy.py <ssh-host>
 ```
 
-`build.py` stages the app with its shared files, generates the icons, builds the service, and writes the IPK to `build/`. `deploy.py` copies it to the TV, installs the IPK (checking the installed version and retrying once), elevates the service, and restarts it (the service then writes its boot hook). It also writes `com.abbiedoobie.crosshair.manifest.json` next to the IPK, for the Homebrew Channel repository; attach both to the GitHub release `v<version>`. The store icon is kept in `assets/icon130.png`, and `build.py` updates it if the generated icon changes. `<ssh-host>` is anything `ssh` accepts, such as `root@<tv-ip>` or a Host alias from your SSH config.
+`build.py` stages the app with its shared files, generates the icons, builds the service, and writes the IPK to `build/`. `deploy.py` copies it to the TV, installs the IPK (checking the installed version and retrying once), elevates the service, and restarts it (the service then writes its boot hook). `build.py` also writes `com.abbiedoobie.crosshair.manifest.json` next to the IPK, for the Homebrew Channel repository; attach both to the GitHub release `v<version>`. The store icon is kept in `assets/icon130.png`, and `build.py` updates it if the generated icon changes. `<ssh-host>` is anything `ssh` accepts, such as `root@<tv-ip>` or a Host alias from your SSH config.
 
 ### The service
 
