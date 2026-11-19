@@ -13,12 +13,12 @@ def png(size: int) -> bytes:
     bg = (12, 12, 12)
     fg = (0, 255, 0)
     radius = size * 0.18
-    centre = (size - 1) / 2
+    center = (size - 1) / 2
     rows = []
     for y in range(size):
-        row = bytearray([0])  # filter type: none
+        row = bytearray([0])  #Filter type: none
         for x in range(size):
-            inside = (x - centre) ** 2 + (y - centre) ** 2 <= radius ** 2
+            inside = (x - center) ** 2 + (y - center) ** 2 <= radius ** 2
             row += bytes(fg if inside else bg)
         rows.append(bytes(row))
     raw = b"".join(rows)

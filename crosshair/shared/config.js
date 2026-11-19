@@ -11,8 +11,8 @@
 }(this, function () {
     'use strict';
 
-    // Every shape, in the order the settings panel cycles through them. `uses` lists which
-    // size controls mean something for that shape; the panel hides the others.
+    //Every shape, in the order the settings panel cycles through them. `uses` lists which
+    //size controls mean something for that shape; the panel hides the others.
     var SHAPE_LIST = [
         { id: 'dot', name: 'Dot', uses: [] },
         { id: 'circle', name: 'Circle', uses: ['thickness'] },
@@ -61,8 +61,8 @@
         { name: 'White', value: '#ffffff' }
     ];
 
-    // Sizes are in the web app's 1920x1080 units: the TV's graphics plane is 1080p, so on a
-    // 4K panel each unit is a 2x2 block of physical pixels and half units can't be drawn.
+    //Sizes are in the web app's 1920x1080 units: the TV's graphics plane is 1080p, so on a
+    //4K panel each unit is a 2x2 block of physical pixels and half units can't be drawn.
     var NUMBERS = {
         size: { min: 2, max: 96, step: 1 },
         thickness: { min: 1, max: 8, step: 1 },
@@ -75,12 +75,12 @@
         offsetY: { min: -500, max: 500, step: 1 }
     };
 
-    // `visible` is the on/off switch. `autoStart` decides what it is after the TV powers on
-    // (boot, or wake from standby): on if true, off if false. `brightness` applies to SDR
-    // pictures and `hdrBrightness` to HDR ones, because the TV draws app graphics far
-    // brighter while it shows HDR. `tripleOpensSettings` makes three quick presses of the
-    // remote button open the settings panel (one press still turns the crosshair on or off).
-    // `hideOutsideInputs` hides it while Home or an app is in front instead of an input.
+    //`visible` is the on/off switch. `autoStart` decides what it is after the TV powers on
+    //(boot, or wake from standby): on if true, off if false. `brightness` applies to SDR
+    //pictures and `hdrBrightness` to HDR ones, because the TV draws app graphics far
+    //brighter while it shows HDR. `tripleOpensSettings` makes three quick presses of the
+    //remote button open the settings panel (one press still turns the crosshair on or off).
+    //`hideOutsideInputs` hides it while Home or an app is in front instead of an input.
     var DEFAULTS = {
         visible: false,
         autoStart: false,
@@ -103,12 +103,15 @@
 
     var BOOLS = ['visible', 'autoStart', 'tripleOpensSettings', 'hideOutsideInputs', 'outline'];
 
-    function clampNumber(key, value) {
+    //Clamp a number to its range. Anything that isn't a number (or a numeric string) kicks
+    //back `fallback`, the current value.
+    function clampNumber(key, value, fallback) {
         var spec = NUMBERS[key];
-        var n = Number(value);
-        if (!isFinite(n)) return DEFAULTS[key];
+        var n = typeof value === 'number' ? value
+            : (typeof value === 'string' && value.trim() !== '') ? Number(value) : NaN;
+        if (!isFinite(n)) return fallback;
         n = Math.min(spec.max, Math.max(spec.min, n));
-        // Snap to the step so repeated adjustments never drift (0.1 + 0.05 + ...).
+        //Snap to the step so repeated adjustments never drift (0.1 + 0.05 + ...).
         n = spec.min + Math.round((n - spec.min) / spec.step) * spec.step;
         return Math.round(n * 1000) / 1000;
     }
@@ -117,7 +120,8 @@
         return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
     }
 
-    /* Returns a complete, valid config: `base` with any valid fields of `patch` applied. */
+    //Build a complete, valid config: `base` with any valid fields of `patch` applied.
+    //Invalid fields are skipped, so they keep the value from `base`.
     function merge(base, patch) {
         var out = {};
         var key;
@@ -130,20 +134,20 @@
             if (!Object.prototype.hasOwnProperty.call(DEFAULTS, key)) continue;
             var v = patch[key];
             if (BOOLS.indexOf(key) >= 0) {
-                out[key] = v === true;
+                if (typeof v === 'boolean') out[key] = v;
             } else if (key === 'shape') {
                 if (SHAPES.indexOf(v) >= 0) out[key] = v;
             } else if (key === 'color' || key === 'outlineColor') {
                 if (isColor(v)) out[key] = v.toLowerCase();
             } else if (NUMBERS[key]) {
-                out[key] = clampNumber(key, v);
+                out[key] = clampNumber(key, v, out[key]);
             }
         }
         return out;
     }
 
-    // ---------------------------------------------------------------------------------------
-    // Color helpers.
+    //---------------------------------------------------------------------------------------
+    //Color helpers.
 
     function hexToRgb(hex) {
         var n = parseInt(hex.slice(1), 16);
@@ -157,12 +161,12 @@
         }).join('');
     }
 
-    /* The color with its brightness scaled (0..1): a darker shade, still fully opaque. */
+    //Scale a color's brightness (0..1) for a darker shade, still fully opaque
     function scaleColor(hex, factor) {
         return rgbToHex(hexToRgb(hex).map(function (c) { return c * factor; }));
     }
 
-    /* Fully saturated color for a hue in degrees. */
+    //Convert a hue (in degrees) to a fully saturated color
     function hueToHex(hue) {
         var h = ((hue % 360) + 360) % 360 / 60;
         var x = 1 - Math.abs(h % 2 - 1);
@@ -171,7 +175,7 @@
         return rgbToHex(rgb.map(function (c) { return c * 255; }));
     }
 
-    /* Hue in degrees of a color, rounded to `step`; 0 for greys. */
+    //Grab the hue (in degrees) of a color, rounded to `step`. Greys return 0.
     function hexToHue(hex, step) {
         var rgb = hexToRgb(hex).map(function (c) { return c / 255; });
         var max = Math.max.apply(null, rgb);
@@ -187,7 +191,8 @@
         return (Math.round(h / step) * step) % 360;
     }
 
-    // Settings that change how the crosshair looks (the settings panel previews these).
+    //Panel rows that change how the crosshair looks (the panel previews while one is
+    //selected). Includes the "hue" and "center" rows, which aren't stored settings.
     var LOOK_KEYS = ['shape', 'color', 'hue', 'size', 'thickness', 'gap', 'opacity',
         'brightness', 'hdrBrightness', 'outline', 'outlineColor', 'outlineWidth',
         'offsetX', 'offsetY', 'center'];

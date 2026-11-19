@@ -11,14 +11,16 @@
     var SERVICE = 'luna://org.abbie.crosshair.service/';
     var RETRY_MS = 2000;
 
-    // Nothing is drawn until the service answers, so a crosshair that is meant to be off
-    // never flashes up.
+    //Nothing is drawn until the service answers, so a crosshair that is meant to be off
+    //never flashes up.
     var svg = document.getElementById('crosshair');
 
     function subscribe() {
-        Luna.subscribe(SERVICE + 'getConfig', {}, function (reply) {
+        var handle = Luna.subscribe(SERVICE + 'getConfig', {}, function (reply) {
             if (reply.returnValue === false || reply.subscribed === false) {
-                // Service restarting (reinstall, crash): try again shortly.
+                //Service restarting (reinstall, crash). Drop the dead subscription so
+                //retries don't pile up bridges, then try again shortly.
+                if (handle) handle.cancel();
                 setTimeout(subscribe, RETRY_MS);
                 return;
             }
@@ -29,7 +31,4 @@
     }
 
     subscribe();
-
-    // A relaunch (the service re-asserting the window after a wake) needs nothing extra.
-    document.addEventListener('webOSRelaunch', function () {}, true);
 }());

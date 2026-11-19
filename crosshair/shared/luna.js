@@ -4,8 +4,8 @@
  *   Luna.call(uri, params, callback)       one reply
  *   Luna.subscribe(uri, params, callback)  a reply per change; returns { cancel() }
  *
- * A bridge object must stay referenced until its replies arrive, so every request is held
- * in `live`: a one-shot call until its reply, a subscription until cancelled.
+ * NOTE: A bridge object must stay referenced until its replies arrive, so every request is
+ * held in `live`: a one-shot call until its reply, a subscription until cancelled.
  */
 (function (root) {
     'use strict';
@@ -24,7 +24,7 @@
 
         var handle = {
             cancel: function () {
-                try { bridge.cancel(); } catch (e) { /* already gone */ }
+                try { bridge.cancel(); } catch (e) { /* Already gone */ }
                 drop();
             }
         };

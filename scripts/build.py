@@ -19,7 +19,7 @@ STAGE = BUILD / "stage"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import icons  # noqa: E402
 
-# Which shared files each component needs.
+#Which shared files each component needs.
 COMPONENTS = {
     "settings": ["luna.js", "config.js", "render.js"],
     "service": ["config.js"],

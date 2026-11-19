@@ -1,6 +1,6 @@
 #!/bin/sh
-# Run on the TV: prints game mode, ALLM, VRR, HDR, and resolution with the crosshair off,
-# on, and off again, to show the crosshair does not change them. Leaves the crosshair off.
+#Run on the TV: prints game mode, ALLM, VRR, HDR, and resolution with the crosshair off,
+#on, and off again, to show the crosshair does not change them. Leaves the crosshair off.
 
 snap() {
   luna-send -n 1 luna://com.webos.service.videooutput/getStatus '{}' | node -e '

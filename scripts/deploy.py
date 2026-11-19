@@ -42,8 +42,8 @@ install_once() {
     kill $pid 2>/dev/null || true; echo "TIMEOUT installing $id"; return 1
 }
 
-# The install service has once reported "installed" while leaving the old version in
-# place, so check the version on disk and try once more if it's wrong.
+#The install service has once reported "installed" while leaving the old version in
+#place, so check the version on disk and try once more if it's wrong.
 install_ipk() {
     id="$1"; ipk="$2"; want="$3"
     appinfo="/media/developer/apps/usr/palm/applications/$id/appinfo.json"
@@ -58,7 +58,7 @@ install_ipk() {
     echo "FAILED $id: installed version is not $want"; return 1
 }
 
-# This script arrives on stdin, so `pkill -f` can't match the shell running it.
+#NOTE: This script arrives on stdin, so `pkill -f` can't match the shell running it.
 luna-send -n 1 luna://com.webos.applicationManager/closeByAppId '{"id":"org.abbie.crosshair.dot"}' >/dev/null 2>&1 || true
 pkill -f "__SERVICE__" 2>/dev/null || true
 
@@ -94,15 +94,16 @@ def main() -> None:
 
     ipks = {}
     for app in APPS:
-        found = sorted(BUILD.glob(f"{app}_*_all.ipk"))
+        found = list(BUILD.glob(f"{app}_*_all.ipk"))
         if not found:
             sys.exit(f"no IPK for {app} in build/; run scripts/build.py first")
-        ipks[app] = found[-1]
+        #Sort by version numbers, not text, so 0.10.0 beats 0.9.0
+        ipks[app] = max(found, key=lambda p: tuple(int(x) for x in p.name.split("_")[1].split(".")))
 
     files = [str(p) for p in ipks.values()] + [str(BOOT_HOOK), str(INPUTHOOK_HOOK)]
     subprocess.run(["scp", "-q", *files, f"{host}:/tmp/"], check=True)
 
-    # IPK names are <id>_<version>_all.ipk.
+    #IPK names are <id>_<version>_all.ipk.
     installs = "\n".join(f'install_ipk {app} /tmp/{ipk.name} {ipk.name.split("_")[1]}'
                          for app, ipk in ipks.items())
     script = REMOTE.replace("__INSTALLS__", installs).replace("__SERVICE__", SERVICE)

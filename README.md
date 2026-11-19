@@ -11,7 +11,7 @@ itself after the screen sleeps.
 - Color presets or any hue, size, thickness, gap, opacity, and an optional outline.
 - Separate brightness for SDR and HDR, switched automatically: the TV draws app graphics much
   brighter over HDR games.
-- Move it anywhere on screen for games whose aim point isn't the exact centre. Hold Left or
+- Move it anywhere on screen for games whose aim point isn't the exact center. Hold Left or
   Right in the settings to move faster.
 - On-TV settings: open **Crosshair** from the app list. An on/off switch sits at the top.
   While the crosshair is off, selecting a look setting previews it in place. While it's on,
@@ -38,7 +38,9 @@ itself after the screen sleeps.
 ### Remote button (LG Input Hook)
 
 One press turns the crosshair on or off. Three quick presses open the settings panel; turn
-off **Triple press opens settings** to make every press a plain toggle. Add an entry to `/home/root/.config/lginputhook/keybinds.json`, using the key code of the
+off **Triple press opens settings** to make every press a plain toggle.
+
+Add an entry to `/home/root/.config/lginputhook/keybinds.json`, using the key code of the
 button you want (the MR22 Magic Remote's Alexa button is `1086`). Input Hook reloads the file
 by itself.
 
@@ -78,8 +80,10 @@ Brightness gives an opaque, darker shade of the color. Opacity lets the game sho
 ## Technical Stuff and Limitations
 
 - **Needs a rooted TV** with the Homebrew Channel. Tested on an LG OLED C2 running webOS 10.3.1.
-- **The Home menu doesn't open while the crosshair is on.** Turn it off to use Home. The input
-  picker, Game Optimizer, and picture settings work either way.
+- **Home and apps hide the crosshair.** With **Hide on Home and apps** on (the default), it
+  closes while Home or an app is in front and comes back on an input. With that option off,
+  Home and Back may not work properly while the crosshair is up. The input picker, Game
+  Optimizer, and picture settings work either way.
 - The crosshair is a `floating` window: a compositor layer above the full-screen input,
   below the TV's own menus. The 2-minute idle timer that closes overlay windows doesn't touch
   it, and it doesn't take remote focus.
@@ -105,7 +109,7 @@ python scripts/deploy.py <ssh-host>
 |---|---|
 | `crosshair/dot/` | `org.abbie.crosshair.dot`: the floating, transparent web app that draws the crosshair (SVG) |
 | `crosshair/settings/` | `org.abbie.crosshair`: the on-TV settings panel (overlay window), and the app-list entry |
-| `crosshair/service/` | `org.abbie.crosshair.service`: root JS service; stores settings, toggles, keeps the dot loaded |
+| `crosshair/service/` | `org.abbie.crosshair.service`: root JS service; stores settings, toggles, and starts or closes the dot app |
 | `crosshair/shared/` | `config.js` (settings schema and validation), `render.js` (draws the crosshair), and `luna.js` (bus client), copied into each package |
 | `crosshair/boot/` | Homebrew Channel boot hook |
 | `scripts/` | `build.py`, `deploy.py`, and `icons.py` (generates the launcher icons) |

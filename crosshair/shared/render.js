@@ -26,14 +26,14 @@
         return node;
     }
 
-    /* The parts for one shape, as [{ node, stroke: bool }, ...]. */
+    //Build the parts for one shape, as [{ node, stroke: bool }, ...]
     function parts(c, cx, cy) {
         var s = c.size;
         var t = c.thickness;
         var g = c.gap;
         var half = t / 2;
         var out = [];
-        var centreDot = Math.max(2, t * 1.5);
+        var centerDot = Math.max(2, t * 1.5);
 
         function fill(node) { out.push({ node: node, stroke: false }); }
         function stroke(node) { out.push({ node: node, stroke: true }); }
@@ -50,8 +50,8 @@
             }
             stroke(el('circle', attrs));
         }
-        /* A straight bar of thickness t from (x1,y1) to (x2,y2), as a filled polygon so the
-           outline wraps its ends too. */
+        //Draw a straight bar of thickness t from (x1,y1) to (x2,y2), as a filled polygon so
+        //the outline wraps its ends too.
         function bar(x1, y1, x2, y2) {
             var dx = x2 - x1;
             var dy = y2 - y1;
@@ -69,7 +69,7 @@
             }));
         }
 
-        // Cross arms: length s, starting g from the centre.
+        //Cross arms: length s, starting g from the center.
         function armLeft() { rect(cx - g - s, cy - half, s, t); }
         function armRight() { rect(cx + g, cy - half, s, t); }
         function armDown() { rect(cx - half, cy + g, t, s); }
@@ -88,10 +88,10 @@
             break;
         case 'circledot':
             ring(s / 2);
-            dot(centreDot);
+            dot(centerDot);
             break;
         case 'arcs': {
-            // Four arcs with gaps centred on right, bottom, left, and top.
+            //Four arcs with gaps centered on right, bottom, left, and top.
             var r = s / 2;
             var quarter = Math.PI * r / 2;
             var gapLen = Math.min(quarter * 0.8, Math.max(2, g * 2));
@@ -103,20 +103,20 @@
         case 'cross':
         case 'crossdot':
             armLeft(); armRight(); armDown(); armUp();
-            if (c.shape === 'crossdot') dot(centreDot);
+            if (c.shape === 'crossdot') dot(centerDot);
             break;
         case 'tcross':
         case 'tdot':
             armLeft(); armRight(); armDown();
-            if (c.shape === 'tdot') dot(centreDot);
+            if (c.shape === 'tdot') dot(centerDot);
             break;
         case 'xcross':
         case 'xdot':
             diagonals();
-            if (c.shape === 'xdot') dot(centreDot);
+            if (c.shape === 'xdot') dot(centerDot);
             break;
         case 'scope': {
-            // A ring at radius g + s with cross arms running from the gap out to it.
+            //A ring at radius g + s with cross arms running from the gap out to it.
             var rr = g + s;
             ring(rr);
             armLeft(); armRight(); armDown(); armUp();
@@ -128,22 +128,22 @@
         case 'square':
         case 'squaredot': {
             var h = s / 2;
-            rect(cx - h, cy - h, s, t);           // top
-            rect(cx - h, cy + h - t, s, t);       // bottom
-            rect(cx - h, cy - h, t, s);           // left
-            rect(cx + h - t, cy - h, t, s);       // right
-            if (c.shape === 'squaredot') dot(centreDot);
+            rect(cx - h, cy - h, s, t);           //Top
+            rect(cx - h, cy + h - t, s, t);       //Bottom
+            rect(cx - h, cy - h, t, s);           //Left
+            rect(cx + h - t, cy - h, t, s);       //Right
+            if (c.shape === 'squaredot') dot(centerDot);
             break;
         }
         case 'diamond':
         case 'diamonddot': {
             var dh = s / 2;
             path([[cx, cy - dh], [cx + dh, cy], [cx, cy + dh], [cx - dh, cy]], true);
-            if (c.shape === 'diamonddot') dot(centreDot);
+            if (c.shape === 'diamonddot') dot(centerDot);
             break;
         }
         case 'brackets': {
-            // Four corner brackets around an empty square of half-width g + s/2.
+            //Four corner brackets around an empty square of half-width g + s/2.
             var b = g + s / 2;
             var arm = Math.max(t * 2, s / 2);
             [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (q) {
@@ -157,8 +157,8 @@
             break;
         }
         case 'chevron': {
-            // An upward V whose point sits on the aim point: two bars, plus a small diamond
-            // that fills the notch where they meet.
+            //A caret (^) whose point sits on the aim point: two bars, plus a small diamond
+            //that fills the notch where they meet.
             bar(cx, cy, cx - s / 2, cy + s / 2);
             bar(cx, cy, cx + s / 2, cy + s / 2);
             var k = half * Math.SQRT2;
@@ -224,7 +224,7 @@
 
         var cx = CX + c.offsetX;
         var cy = CY + c.offsetY;
-        // One group carries the opacity so overlapping parts don't double up.
+        //One group carries the opacity so overlapping parts don't double up.
         var group = el('g', { opacity: c.opacity });
 
         if (c.outline) {

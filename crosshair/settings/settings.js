@@ -18,13 +18,14 @@
 
     var KEY = { LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, OK: 13, BACK: 461, ESC: 27 };
     var HUE_STEP = 5;
-    var REPEAT_MS = 300;        // presses closer than this count as holding the key
+    var REPEAT_MS = 300;        //Presses closer than this count as holding the key
+    var RETRY_MS = 2000;        //Wait before subscribing again after the service drops
 
     var config = null;
-    var hdr = false;            // the TV is showing HDR, so HDR brightness is in use
+    var hdr = false;            //The TV is showing HDR, so HDR brightness is in use
     var selectedKey = 'visible';
-    var requestSeq = 0;         // newest setConfig sent
-    var inFlight = 0;           // setConfig calls not yet answered
+    var requestSeq = 0;         //Sequence number of the newest setConfig sent
+    var inFlight = 0;           //Number of setConfig calls not yet answered
     var lastKey = 0;
     var lastKeyTime = 0;
     var repeats = 0;
@@ -87,11 +88,11 @@
         return visibleRows().filter(function (r) { return !r.divider; });
     }
 
-    // -----------------------------------------------------------------------------------
-    // Changing values.
+    //-----------------------------------------------------------------------------------
+    //Changing values.
 
     function send(patch) {
-        config = C.merge(config, patch);   // show it at once; the service has the final say
+        config = C.merge(config, patch);   //Show it at once; the service has the final say
         render();
         var seq = ++requestSeq;
         inFlight++;
@@ -99,6 +100,7 @@
             inFlight--;
             if (reply.returnValue === false) {
                 showMessage('Could not save: ' + (reply.errorText || 'service not responding'));
+                resync();
                 return;
             }
             if (seq === requestSeq && reply.config) {
@@ -108,8 +110,8 @@
         });
     }
 
-    /* How many steps one press moves, growing while Left/Right is held. Only for settings
-       with long ranges; short ones stay one step per press. */
+    //Work out how many steps one press moves, growing while Left/Right is held. Only for
+    //settings with long ranges; short ones stay one step per press.
     function stepsFor(row) {
         var range;
         if (row.type === 'hue') range = 360 / HUE_STEP;
@@ -125,7 +127,7 @@
         var patch = {};
         var v = config[row.key];
         if (row.type === 'bool') {
-            // Like a switch: Right turns it on, Left turns it off.
+            //Like a switch: Right turns it on, Left turns it off.
             if (v === (dir > 0)) return;
             patch[row.key] = dir > 0;
         } else if (row.type === 'choice' || row.type === 'color') {
@@ -151,6 +153,17 @@
         else if (row.key === 'close') close();
     }
 
+    //Grab the service's real values after a failed save, so the panel doesn't keep showing
+    //a change that never happened
+    function resync() {
+        Luna.call(SERVICE + 'getConfig', {}, function (reply) {
+            if (reply.config && inFlight === 0) {
+                config = reply.config;
+                render();
+            }
+        });
+    }
+
     function resetConfig() {
         ++requestSeq;
         Luna.call(SERVICE + 'resetConfig', {}, function (reply) {
@@ -165,15 +178,15 @@
         window.close();
     }
 
-    // -----------------------------------------------------------------------------------
-    // Drawing.
+    //-----------------------------------------------------------------------------------
+    //Drawing.
 
     function showMessage(text) {
         messageEl.textContent = text || '';
     }
 
-    // The service answers but isn't root: settings won't be kept, and the crosshair won't
-    // follow the TV's power state reliably.
+    //Warn when the service answers but isn't root: settings won't be kept, and the crosshair
+    //won't follow the TV's power state reliably.
     function showElevationWarning(show) {
         if (!warningEl || warningEl.hidden === !show) return;
         warningEl.hidden = !show;
@@ -220,7 +233,7 @@
         return a;
     }
 
-    /* While the crosshair is off, draw it here whenever a look setting is selected. */
+    //Draw a preview here whenever a look setting is selected while the crosshair is off
     function renderPreview() {
         var show = !config.visible && C.LOOK_KEYS.indexOf(selectedKey) >= 0;
         if (show) CrosshairRender.draw(previewEl, config, { hdr: hdr });
@@ -299,11 +312,11 @@
             rowsEl.appendChild(el);
         });
 
-        // Keep the selected row in view, clear of the faded edges, when the list is taller
-        // than the panel.
+        //Keep the selected row in view, clear of the faded edges, when the list is taller
+        //than the panel.
         if (selectedEl) {
-            var margin = 80;                    // more than the 56px edge fade
-            var top = selectedEl.offsetTop;     // #rows is the offset parent
+            var margin = 80;                    //More than the 56px edge fade
+            var top = selectedEl.offsetTop;     //Relative to #rows (the offset parent)
             var bottom = top + selectedEl.offsetHeight;
             if (top < rowsEl.scrollTop + margin) rowsEl.scrollTop = Math.max(0, top - margin);
             else if (bottom > rowsEl.scrollTop + rowsEl.clientHeight - margin) {
@@ -313,15 +326,15 @@
         updateScrollFade();
     }
 
-    /* Fade the list's top or bottom edge while rows are hidden past it. */
+    //Fade the list's top or bottom edge while rows are hidden past it
     function updateScrollFade() {
         var above = rowsEl.scrollTop > 0;
         var below = rowsEl.scrollTop + rowsEl.clientHeight < rowsEl.scrollHeight - 1;
         rowsEl.className = (above ? 'more-above' : '') + (below ? ' more-below' : '');
     }
 
-    // -----------------------------------------------------------------------------------
-    // Remote keys.
+    //-----------------------------------------------------------------------------------
+    //Remote keys.
 
     function moveSelection(dir) {
         var rows = selectableRows();
@@ -366,24 +379,32 @@
         e.preventDefault();
     });
 
-    // -----------------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------------
 
-    Luna.subscribe(SERVICE + 'getConfig', {}, function (reply) {
-        if (reply.returnValue === false) {
-            showMessage('Crosshair service not responding. Is it installed and elevated?');
-            return;
-        }
-        showMessage('');
-        showElevationWarning(reply.elevated === false);
-        if (typeof reply.hdr === 'boolean' && reply.hdr !== hdr) {
-            hdr = reply.hdr;
-            if (config) render();
-        }
-        // While our own changes are in flight, the pushes are echoes of older values and
-        // would make a held arrow key flicker backwards.
-        if (reply.config && inFlight === 0) {
-            config = reply.config;
-            render();
-        }
-    });
+    //Follow the service's settings. If it drops (reinstall, crash), drop the dead
+    //subscription and keep trying, so the panel picks the service back up by itself.
+    function subscribe() {
+        var handle = Luna.subscribe(SERVICE + 'getConfig', {}, function (reply) {
+            if (reply.returnValue === false || reply.subscribed === false) {
+                showMessage('Crosshair service not responding. Is it installed and elevated?');
+                if (handle) handle.cancel();
+                setTimeout(subscribe, RETRY_MS);
+                return;
+            }
+            showMessage('');
+            showElevationWarning(reply.elevated === false);
+            if (typeof reply.hdr === 'boolean' && reply.hdr !== hdr) {
+                hdr = reply.hdr;
+                if (config) render();
+            }
+            //While our own changes are in flight, the pushes are echoes of older values and
+            //would make a held arrow key flicker backwards.
+            if (reply.config && inFlight === 0) {
+                config = reply.config;
+                render();
+            }
+        });
+    }
+
+    subscribe();
 }());
