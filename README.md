@@ -65,7 +65,6 @@ Notes:
 - **Use `button`, not `toggle`.** `button` handles both modes: with **Triple press opens settings** off, every press is a plain toggle, so it behaves exactly like `toggle`. `show`, `hide`, and `toggle` remain available if you want separate buttons for them.
 - **Don't add `&` to the end of the command.** Input Hook never runs a backgrounded command.
 - **Pick a button that isn't bound to anything else** in Input Hook.
-- **Keep Input Hook's autostart reliable.** Input Hook's own boot script can remove itself after one failed start, and its hook only attaches if `lginput2` is already running. `scripts/deploy.py` installs `extras/inputhook-autostart/96-inputhook-autostart` when Input Hook is present, which checks the hook after boot and restarts Input Hook if needed (3 times at most). `scripts/tv/status.sh` shows whether `lginput2` is hooked.
 - Presses count as one gesture while each comes within 600 ms of the one before. The first press toggles right away; a second is held back and undone when the gesture ends (so two presses leave things as they were); a third undoes the first and opens the settings panel. Each press is logged in `/tmp/org.abbie.crosshair.log` as `button press <n>`.
 
 ## Options
@@ -175,7 +174,6 @@ All methods are at `luna://org.abbie.crosshair.service/<method>`.
 | `/home/root/.config/org.abbie.crosshair/config.json` | Saved settings |
 | `/tmp/org.abbie.crosshair.log` | Service log (cleared every boot) |
 | `/var/lib/webosbrew/init.d/95-abbie-crosshair` | Boot hook |
-| `/var/lib/webosbrew/init.d/96-inputhook-autostart` | Input Hook autostart helper (only if Input Hook is installed) |
 
 ## Building
 
@@ -186,7 +184,7 @@ python scripts/build.py
 python scripts/deploy.py <ssh-host>
 ```
 
-`build.py` stages each part with its shared files, generates the icons, and writes both IPKs to `build/`. `deploy.py` copies them to the TV, installs them (checking the installed version and retrying once), elevates the service, installs the boot hook (and the Input Hook autostart helper if Input Hook is present), and restarts the service. `<ssh-host>` is anything `ssh` accepts, such as `root@<tv-ip>` or a Host alias from your SSH config.
+`build.py` stages each part with its shared files, generates the icons, and writes both IPKs to `build/`. `deploy.py` copies them to the TV, installs them (checking the installed version and retrying once), elevates the service, installs the boot hook, and restarts the service. `<ssh-host>` is anything `ssh` accepts, such as `root@<tv-ip>` or a Host alias from your SSH config.
 
 ### Development previews
 
@@ -211,7 +209,6 @@ Run on the TV over SSH (`ssh -tt`, so `luna-send` prints its replies):
 | `crosshair/service/` | The root JS service |
 | `crosshair/shared/` | `config.js` (settings schema and validation), `render.js` (drawing), and `luna.js` (bus client), copied into each package |
 | `crosshair/boot/` | Homebrew Channel boot hook |
-| `extras/inputhook-autostart/` | Boot helper that keeps Input Hook's autostart working |
 | `scripts/` | `build.py`, `deploy.py`, and `icons.py` (launcher icons) |
 | `scripts/tv/` | Scripts to run on the TV |
 | `dev/` | Desktop previews |

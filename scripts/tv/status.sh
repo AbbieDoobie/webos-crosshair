@@ -22,5 +22,4 @@ for n in lginput2 micomservice; do
     echo "  $n: $h"
 done
 pgrep -f org.webosbrew.inputhook.service >/dev/null && echo "  service: running" || echo "  service: not running"
-echo "  boot script log:"; sed 's/^/    /' /tmp/inputhook-autostart.log 2>/dev/null || echo "    (none this boot)"
 echo "  boot scripts:"; ls /var/lib/webosbrew/init.d/ | sed 's/^/    /'
