@@ -1,6 +1,6 @@
 # Crosshair (LG webOS TVs)
 
-A crosshair on top of whatever your TV is showing, for games on an HDMI input. Pick a shape, color, and size, and it just sits there over the picture without taking the remote away from you.
+A crosshair on top of whatever your TV is currently showing. Pick a shape, color, and size, and the crosshair will overlay itself over the picture.
 
 Made for console and PC games that don't have a crosshair of their own (or only show one while aiming). Game Optimizer, VRR, ALLM, and HDR all stay on with it up, and by default it gets out of the way by itself when you go to Home or open an app.
 
@@ -48,7 +48,7 @@ Made for console and PC games that don't have a crosshair of their own (or only 
 
 ## Remote Button Setup (LG Input Hook)
 
-LG Input Hook (`org.webosbrew.inputhook`, available in the Homebrew Channel) can run a command when a remote button is pressed. Bind any button you like to the crosshair's `button` method for one-press on/off and, if enabled, triple-press settings.
+LG Input Hook (`org.webosbrew.inputhook`, available in the Homebrew Channel) can run a command when a remote button is pressed. Bind any button you like to the crosshair's `button` method for one-press on/off and, if enabled, triple-press to open settings.
 
 1. Open **LG Input Hook** and press the button you want to use. Input Hook shows its key code.
 2. Choose **Add keybind** and enter that key code in **ID**.
@@ -74,7 +74,7 @@ Up/Down picks a row, Left/Right changes it (hold to speed up on long ranges), OK
 
 **Crosshair** turns it on or off. **Off by default.**
 
-**Auto-start with TV** decides what happens when the TV powers on (a boot, or waking from standby): on if enabled, off if not. The dim "Screen Off" state doesn't count as powering on, so the crosshair just comes back how it was. **Off by default.**
+**Auto-start with TV** decides what happens when the TV powers on (a boot, or waking from standby): on if enabled, off if not. **Off by default.**
 
 **Triple press opens settings** makes three quick presses of your remote button open this panel. One press still turns the crosshair on or off. Turn it off to make every press a plain toggle. **On by default.**
 
@@ -142,7 +142,7 @@ The crosshair is three parts in two packages:
 
 - Game Optimizer, ALLM, VRR, HDR, and the refresh rate are unchanged with the crosshair up (checked at 4K 120 Hz HDR10 with `scripts/tv/gamecheck.sh`).
 - About 30 MB for the dot app while on, and about 21 MB for the service. No CPU use while idle.
-- Input lag has not been measured.
+- Input lag has not been measured, though none was noticeable in testing.
 
 ### Limitations
 
