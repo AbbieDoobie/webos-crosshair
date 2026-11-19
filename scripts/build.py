@@ -3,13 +3,14 @@
   org.abbie.crosshair_<v>_all.ipk      settings app + root service
   org.abbie.crosshair.dot_<v>_all.ipk  the floating dot
 
-Usage: python scripts/build.py [--native]
+Usage: python scripts/build.py [--js]
 Needs `ares-package` (npm @webos-tools/cli, Node.js 20+) on PATH.
 
---native ships the C service (crosshair/native) instead of the JS one (crosshair/service).
-It needs the buildroot-nc4 webOS toolchain: on Windows in WSL (distro from
-CROSSHAIR_WSL_DISTRO, default Ubuntu-24.04), elsewhere on this machine. See
-scripts/build-native.sh.
+The service is the native C one (crosshair/native) by default. It needs the buildroot-nc4
+webOS toolchain: on Windows in WSL (distro from CROSSHAIR_WSL_DISTRO, default
+Ubuntu-24.04), elsewhere on this machine. See scripts/build-native.sh.
+
+--js ships the older JS service (crosshair/service) instead, which needs no toolchain.
 """
 import io
 import os
@@ -109,7 +110,7 @@ def package(*dirs: Path) -> None:
 
 
 def main() -> None:
-    native = "--native" in sys.argv[1:]
+    native = "--js" not in sys.argv[1:]
     if STAGE.exists():
         shutil.rmtree(STAGE)
     for ipk in BUILD.glob("*.ipk"):

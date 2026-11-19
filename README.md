@@ -179,7 +179,7 @@ All methods are at `luna://org.abbie.crosshair.service/<method>`.
 
 ## Building
 
-Requirements: Python 3, Node.js 20 or newer, and LG's CLI (`npm install -g @webos-tools/cli`) with `ares-package` on `PATH`.
+Requirements: Python 3, Node.js 20 or newer, LG's CLI (`npm install -g @webos-tools/cli`) with `ares-package` on `PATH`, and the webOS toolchain for the native service (see below).
 
 ```sh
 python scripts/build.py
@@ -190,11 +190,12 @@ python scripts/deploy.py <ssh-host>
 
 ### Native service
 
-`python scripts/build.py --native` ships the C service in `crosshair/native/` instead of the JS one. It needs CMake and the [buildroot-nc4](https://github.com/openlgtv/buildroot-nc4) webOS toolchain (built and tested with release `webos-a38c582`), extracted with `relocate-sdk.sh` run. The toolchain runs on Linux; on Windows, `build.py` runs `scripts/build-native.sh` in WSL (distro `Ubuntu-24.04`, or set `CROSSHAIR_WSL_DISTRO`). Set `TOOLCHAIN` if the SDK isn't in `~/arm-webos-linux-gnueabi_sdk-buildroot`.
+The service is built from the C source in `crosshair/native/` by default. It needs CMake and the [buildroot-nc4](https://github.com/openlgtv/buildroot-nc4) webOS toolchain (built and tested with release `webos-a38c582`), extracted with `relocate-sdk.sh` run. The toolchain runs on Linux; on Windows, `build.py` runs `scripts/build-native.sh` in WSL (distro `Ubuntu-24.04`, or set `CROSSHAIR_WSL_DISTRO`). Set `TOOLCHAIN` if the SDK isn't in `~/arm-webos-linux-gnueabi_sdk-buildroot`.
 
 - `scripts/gen_schema.py` writes the C settings table from `config.js`, so defaults, limits, and shapes stay in one place.
 - `scripts/native_parity.py <ssh-host>` runs a few thousand random settings patches through `config.js` and through the C code on the TV, and checks that they match.
 - `ares-package` takes file modes from the disk, and Windows has none, so `build.py` marks the service binary executable inside the IPK.
+- `python scripts/build.py --js` ships the older JS service in `crosshair/service/` instead. It does the same job, needs no toolchain, and takes about 7 MB of RAM instead of 0.4 MB.
 
 ### Development previews
 
@@ -216,8 +217,8 @@ Run on the TV over SSH (`ssh -tt`, so `luna-send` prints its replies):
 |---|---|
 | `crosshair/dot/` | The floating dot app |
 | `crosshair/settings/` | The settings panel app |
-| `crosshair/service/` | The root JS service |
-| `crosshair/native/` | The same service in C (`--native`) |
+| `crosshair/native/` | The root service, in C (the default) |
+| `crosshair/service/` | The same service in JS (`--js`) |
 | `crosshair/shared/` | `config.js` (settings schema and validation), `render.js` (drawing), and `luna.js` (bus client), copied into each package |
 | `crosshair/boot/` | Homebrew Channel boot hook |
 | `scripts/` | `build.py`, `deploy.py`, `icons.py` (launcher icons), and the native build scripts |
