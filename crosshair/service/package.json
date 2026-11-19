@@ -1,6 +1,6 @@
 {
     "name": "org.abbie.crosshair.service",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "description": "Crosshair settings and keep-alive service",
     "main": "service.js",
     "license": "MIT"

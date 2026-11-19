@@ -1,25 +1,54 @@
-"""Write the app's launcher icons: a green dot on a dark square.
+"""Write the app's launcher icons: a green cross + dot crosshair on a dark square.
 
 Used by build.py; also runs alone: python scripts/icons.py <app folder>
 Uses only the standard library, so it needs no image packages.
+
+The crosshair uses the renderer's cross + dot rules (render.js), in crosshair units: arms
+ARM long starting GAP from the center, THICKNESS wide, and a center dot of 1.5 x thickness.
+Edges are smoothed by sampling each pixel on a SAMPLES x SAMPLES grid.
 """
 import struct
 import sys
 import zlib
 from pathlib import Path
 
+ARM = 4
+THICKNESS = 2
+GAP = 5
+DOT = max(2, THICKNESS * 1.5)
+FILL = 0.8          #Share of the icon the crosshair spans, edge to edge
+SAMPLES = 4
+
+BG = (12, 12, 12)
+FG = (0, 255, 0)
+
+
+def inside(x: float, y: float) -> bool:
+    """Check if a point (crosshair units, center at 0,0) is on the crosshair."""
+    half = THICKNESS / 2
+    if x * x + y * y <= (DOT / 2) ** 2:
+        return True
+    #Horizontal arms, then vertical arms
+    if abs(y) <= half and GAP <= abs(x) <= GAP + ARM:
+        return True
+    return abs(x) <= half and GAP <= abs(y) <= GAP + ARM
+
 
 def png(size: int) -> bytes:
-    bg = (12, 12, 12)
-    fg = (0, 255, 0)
-    radius = size * 0.18
-    center = (size - 1) / 2
+    scale = size * FILL / (2 * (GAP + ARM))     #Pixels per crosshair unit
+    center = size / 2
     rows = []
-    for y in range(size):
+    for py in range(size):
         row = bytearray([0])  #Filter type: none
-        for x in range(size):
-            inside = (x - center) ** 2 + (y - center) ** 2 <= radius ** 2
-            row += bytes(fg if inside else bg)
+        for px in range(size):
+            hits = 0
+            for sy in range(SAMPLES):
+                for sx in range(SAMPLES):
+                    x = (px + (sx + 0.5) / SAMPLES - center) / scale
+                    y = (py + (sy + 0.5) / SAMPLES - center) / scale
+                    hits += inside(x, y)
+            a = hits / (SAMPLES * SAMPLES)
+            row += bytes(round(b + (f - b) * a) for b, f in zip(BG, FG))
         rows.append(bytes(row))
     raw = b"".join(rows)
 
