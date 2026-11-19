@@ -33,7 +33,8 @@
         } else if (method === 'resetConfig') {
             config = CrosshairConfig.merge(CrosshairConfig.DEFAULTS,
                 { visible: config.visible, autoStart: config.autoStart,
-                  tripleOpensSettings: config.tripleOpensSettings });
+                  tripleOpensSettings: config.tripleOpensSettings,
+                  hideOutsideInputs: config.hideOutsideInputs });
             reply(this, { config: config, returnValue: true });
             broadcast();
         } else {

@@ -2,8 +2,8 @@
  * org.abbie.crosshair.service: owns the crosshair settings and keeps the dot on screen.
  *
  * Runs as root (Homebrew Channel's elevate-service). Event driven: it holds a keep-alive
- * activity and three subscriptions (power state, the running-app list, and the picture
- * settings for HDR), and does nothing between events.
+ * activity and four subscriptions (power state, the running-app list, the foreground app,
+ * and the picture settings for HDR), and does nothing between events.
  *
  * Methods (luna://org.abbie.crosshair.service/<method>):
  *   getConfig {subscribe}   current settings, whether the picture is HDR, and whether
@@ -11,7 +11,7 @@
  *                           every change
  *   setConfig {config}      apply a partial settings object; invalid fields are ignored
  *   resetConfig             defaults for the look, keeping on/off, auto-start, and the
- *                           triple-press setting as they are
+ *                           triple-press and hide-outside-inputs settings as they are
  *   show / hide / toggle    turn the crosshair on or off
  *   button                  the remote button (Input Hook calls this): one press toggles;
  *                           with tripleOpensSettings, three quick presses open the panel
@@ -20,6 +20,9 @@
  *
  * Power-on rule: after the TV boots or wakes from standby, the crosshair is on if
  * auto-start is on, and off otherwise. The dim "Screen Off" state isn't a power-on.
+ *
+ * With hideOutsideInputs, the dot app is also closed while Home or an app is in front, and
+ * comes back on an input (HDMI, live TV, AV). The on/off setting itself doesn't change.
  */
 'use strict';
 
@@ -39,9 +42,14 @@ var LOG_FILE = '/tmp/org.abbie.crosshair.log';
 var BOOT_MARKER = '/tmp/org.abbie.crosshair.booted';
 var LOG_MAX_BYTES = 256 * 1024;
 
+// Foreground apps that are a TV input. Anything else in front (Home, an app) hides the dot.
+var INPUT_APP = /^com\.webos\.app\.(hdmi\d+|livetv|externalinput\.)/;
+
 var SAVE_DELAY_MS = 750;        // settings changes arrive in bursts while a value is held
 var WAKE_DELAY_MS = 1500;       // let the compositor settle after the screen comes on
-var LAUNCH_WINDOW_MS = 60000;   // relaunch budget: at most LAUNCH_BUDGET per window
+// Budget for relaunching a dot app that died by itself, so a crashing app can't loop.
+// Launches you cause (on/off, coming back to an input, waking) don't count.
+var LAUNCH_WINDOW_MS = 60000;
 var LAUNCH_BUDGET = 5;
 // Presses count as one gesture while each comes within PRESS_GAP_MS of the one before.
 // Input Hook starts a luna-send per press, which adds about 0.1 s, so this is generous.
@@ -56,6 +64,8 @@ var saveTimer = null;
 var UP_STATES = ['Active', 'Screen Off'];
 var powerState = 'Active';
 var dotRunning = null;          // null until the first running-app reply
+var foregroundApp = '';         // the app in front, from the foreground subscription
+var onInput = true;             // an input is in front (assumed until the first reply)
 var hdr = false;                // the TV is showing an HDR picture (picks hdrBrightness)
 var dynamicRange = '';
 var launchTimes = [];
@@ -108,15 +118,23 @@ function scheduleSave() {
 function applyConfig(next) {
     var changed = JSON.stringify(next) !== JSON.stringify(config);
     var visibilityChanged = next.visible !== config.visible;
+    var hideChanged = next.hideOutsideInputs !== config.hideOutsideInputs;
     config = next;
     if (!changed) return;
     scheduleSave();
     broadcast();
-    if (visibilityChanged) {
-        log('INFO', 'crosshair ' + (config.visible ? 'on' : 'off'));
-        if (config.visible) ensureDot('turned on', false);
-        else closeDot();
-    }
+    if (visibilityChanged) log('INFO', 'crosshair ' + (config.visible ? 'on' : 'off'));
+    if (visibilityChanged || hideChanged) updateDot('turned on');
+}
+
+// Whether the dot should be on screen right now.
+function wanted() {
+    return config.visible && (onInput || !config.hideOutsideInputs);
+}
+
+function updateDot(reason) {
+    if (wanted()) ensureDot(reason, false);
+    else closeDot();
 }
 
 function broadcast() {
@@ -156,18 +174,20 @@ function watchDynamicRange() {
 // Off closes it completely: a loaded floating window, even an empty one, stops the Home
 // menu from opening. Relaunching a previously loaded web app takes about 0.4 s.
 
-function ensureDot(reason, force) {
-    if (!config.visible) return;
+function ensureDot(reason, force, budgeted) {
+    if (!wanted()) return;
     if (UP_STATES.indexOf(powerState) < 0 || launchPending) return;
     if (dotRunning === true && !force) return;
 
-    var now = Date.now();
-    launchTimes = launchTimes.filter(function (t) { return now - t < LAUNCH_WINDOW_MS; });
-    if (launchTimes.length >= LAUNCH_BUDGET) {
-        log('WARN', 'relaunch budget spent, not launching (' + reason + ')');
-        return;
+    if (budgeted) {
+        var now = Date.now();
+        launchTimes = launchTimes.filter(function (t) { return now - t < LAUNCH_WINDOW_MS; });
+        if (launchTimes.length >= LAUNCH_BUDGET) {
+            log('WARN', 'relaunch budget spent, not launching (' + reason + ')');
+            return;
+        }
+        launchTimes.push(now);
     }
-    launchTimes.push(now);
     launchPending = true;
     log('INFO', 'launching dot app (' + reason + ')');
 
@@ -177,8 +197,8 @@ function ensureDot(reason, force) {
             launchPending = false;
             if (!reply.payload.returnValue) {
                 log('ERROR', 'launch failed: ' + (reply.payload.errorText || 'unknown'));
-            } else if (!config.visible) {
-                closeDot(true);     // turned off again while it was launching
+            } else if (!wanted()) {
+                closeDot(true);     // turned off or hidden again while it was launching
             }
         });
 }
@@ -198,13 +218,41 @@ function watchRunningApps() {
         var running = list.some(function (app) { return app.id === DOT_APP_ID; });
         if (running !== dotRunning) {
             dotRunning = running;
-            if (!running) ensureDot('dot app not running', false);
-            else if (!config.visible) closeDot(true);
+            if (!running) ensureDot('dot app not running', false, true);
+            else if (!wanted()) closeDot(true);
         }
     });
     sub.on('cancel', function () {
         log('WARN', 'running-app subscription dropped, retrying');
         setTimeout(watchRunningApps, 5000);
+    });
+}
+
+// The foreground list has the main app first, then anything layered over it (quick
+// settings, our own panel and dot). Only the main app decides, so the picture menus over
+// HDMI keep the crosshair.
+function watchForeground() {
+    var sub = service.subscribe('luna://com.webos.applicationManager/getForegroundAppInfo',
+        { subscribe: true, extraInfo: true });
+    sub.on('response', function (reply) {
+        var list = reply.payload.foregroundAppInfo;
+        if (!Array.isArray(list)) return;
+        var main = list.filter(function (a) {
+            return a.appId && a.appId.indexOf('org.abbie.crosshair') !== 0;
+        })[0];
+        if (!main || main.appId === foregroundApp) return;
+        foregroundApp = main.appId;
+        var input = INPUT_APP.test(foregroundApp);
+        if (input === onInput) return;
+        onInput = input;
+        if (config.visible && config.hideOutsideInputs) {
+            log('INFO', (onInput ? 'showing on ' : 'hiding for ') + foregroundApp);
+        }
+        updateDot('back on ' + foregroundApp);
+    });
+    sub.on('cancel', function () {
+        log('WARN', 'foreground subscription dropped, retrying');
+        setTimeout(watchForeground, 5000);
     });
 }
 
@@ -260,7 +308,8 @@ service.register('setConfig', function (msg) {
 service.register('resetConfig', function (msg) {
     applyConfig(Config.merge(Config.DEFAULTS, {
         visible: config.visible, autoStart: config.autoStart,
-        tripleOpensSettings: config.tripleOpensSettings
+        tripleOpensSettings: config.tripleOpensSettings,
+        hideOutsideInputs: config.hideOutsideInputs
     }));
     msg.respond({ config: config });
 });
@@ -307,7 +356,8 @@ service.register('button', function (msg) {
 service.register('status', function (msg) {
     msg.respond({
         config: config, dotLoaded: dotRunning === true, powerState: powerState,
-        hdr: hdr, dynamicRange: dynamicRange, elevated: elevated
+        hdr: hdr, dynamicRange: dynamicRange, elevated: elevated,
+        foregroundApp: foregroundApp, onInput: onInput
     });
 });
 
@@ -340,4 +390,5 @@ if (!fs.existsSync(BOOT_MARKER)) {
 }
 watchPower();
 watchRunningApps();
+watchForeground();
 watchDynamicRange();

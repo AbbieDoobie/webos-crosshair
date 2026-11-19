@@ -80,10 +80,12 @@
     // pictures and `hdrBrightness` to HDR ones, because the TV draws app graphics far
     // brighter while it shows HDR. `tripleOpensSettings` makes three quick presses of the
     // remote button open the settings panel (one press still turns the crosshair on or off).
+    // `hideOutsideInputs` hides it while Home or an app is in front instead of an input.
     var DEFAULTS = {
         visible: false,
         autoStart: false,
         tripleOpensSettings: true,
+        hideOutsideInputs: true,
         shape: 'dot',
         color: '#00ff00',
         opacity: 1,
@@ -99,7 +101,7 @@
         offsetY: 0
     };
 
-    var BOOLS = ['visible', 'autoStart', 'tripleOpensSettings', 'outline'];
+    var BOOLS = ['visible', 'autoStart', 'tripleOpensSettings', 'hideOutsideInputs', 'outline'];
 
     function clampNumber(key, value) {
         var spec = NUMBERS[key];

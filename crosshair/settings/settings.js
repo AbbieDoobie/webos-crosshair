@@ -49,6 +49,7 @@
         { key: 'visible', label: 'Crosshair', type: 'bool' },
         { key: 'autoStart', label: 'Auto-start with TV', type: 'bool' },
         { key: 'tripleOpensSettings', label: 'Triple press opens settings', type: 'bool' },
+        { key: 'hideOutsideInputs', label: 'Hide on Home and apps', type: 'bool' },
         { divider: true },
         { key: 'shape', label: 'Shape', type: 'choice', choices: C.SHAPES,
             format: function (v) { return C.SHAPE_NAMES[v]; } },

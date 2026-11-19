@@ -55,6 +55,7 @@ Don't end the command with `&`: Input Hook then never runs it.
 | Crosshair | On / Off | Off |
 | Auto-start with TV | On / Off: on after every boot or wake from standby | Off |
 | Triple press opens settings | On / Off: three quick presses of the remote button open this panel | On |
+| Hide on Home and apps | On / Off: hidden while Home or an app is in front; back on an input (HDMI, live TV, AV) | On |
 | Shape | Dot, Circle, Circle + dot, Broken circle, Cross, Cross + dot, T, T + dot, X, X + dot, Scope, Horizontal line, Square, Square + dot, Diamond, Diamond + dot, Corner brackets, Chevron, Triangle, Four dots, Five dots | Dot |
 | Size | 2 to 96 | 8 |
 | Thickness | 1 to 8 (shapes with lines) | 2 |
