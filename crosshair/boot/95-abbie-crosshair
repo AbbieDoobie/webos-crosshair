@@ -1,5 +1,0 @@
-#!/bin/sh
-#Homebrew Channel runs this at boot. Calling the crosshair service starts it, and the
-#service puts the dot back on screen if auto-start is on (with the last saved settings).
-luna-send -n 1 luna://org.abbie.crosshair.service/start '{}' >/dev/null 2>&1 &
-exit 0

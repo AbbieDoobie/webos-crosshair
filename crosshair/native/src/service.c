@@ -1,13 +1,13 @@
 /*
- * org.abbie.crosshair.service: owns the crosshair settings and keeps the dot on screen.
- * The dot and the settings panel are one floating web app, org.abbie.crosshair. The service
+ * com.abbiedoobie.crosshair.service: owns the crosshair settings and keeps the dot on screen.
+ * The dot and the settings panel are one floating web app, com.abbiedoobie.crosshair. The service
  * keeps it loaded while the dot should show or the panel is open, and closes it otherwise.
  *
  * Runs as root (Homebrew Channel's elevate-service). Event driven: a glib main loop with
  * four subscriptions (power state, the running-app list, the foreground app, and the
  * picture settings for HDR), and nothing running between events.
  *
- * Methods (luna://org.abbie.crosshair.service/<method>):
+ * Methods (luna://com.abbiedoobie.crosshair.service/<method>):
  *   getConfig {subscribe}   current settings, whether the dot should be on screen now
  *                           (show), whether the picture is HDR, and whether the service
  *                           runs as root; with subscribe, a reply after every change.
@@ -23,6 +23,8 @@
  *   status                  settings plus whether the app is loaded, whether the panel is
  *                           open, and the power state
  *   start                   no-op; the boot hook calls it to start the service
+ *   restart                 save and exit; the next call starts it again (the panel uses
+ *                           this after getting it elevated, so it comes back as root)
  *
  * Power-on rule: after the TV boots or wakes from standby, the crosshair is on if
  * auto-start is on, and off otherwise. The dim "Screen Off" state isn't a power-on.
@@ -30,10 +32,14 @@
  * With hideOutsideInputs, the dot is also hidden while Home or an app is in front, and
  * comes back on an input (HDMI, live TV, AV). The on/off setting itself doesn't change.
  *
+ * Root comes from Homebrew Channel. The panel asks it to elevate the service the first time
+ * (store installs have no SSH), and once root, the service writes its own boot hook, which
+ * keeps it elevated and starts it at every boot.
+ *
  * Crash recovery: the process the hub starts supervises the service in a child process and
  * restarts it a second after it dies abnormally, up to 5 times a minute (see supervise()).
  *
- * Logging goes to the system log (syslog, tagged org.abbie.crosshair): start, stop,
+ * Logging goes to the system log (syslog, tagged com.abbiedoobie.crosshair): start, stop,
  * warnings, and errors always, and everything else only with verboseLogging on.
  */
 #include <ctype.h>
@@ -57,17 +63,33 @@
 
 #include "config.h"
 
-#define SERVICE_ID "org.abbie.crosshair.service"
-#define APP_ID "org.abbie.crosshair"
-#define OWN_PREFIX "org.abbie.crosshair"
-#define CONFIG_DIR "/home/root/.config/org.abbie.crosshair"
+#define SERVICE_ID "com.abbiedoobie.crosshair.service"
+#define APP_ID "com.abbiedoobie.crosshair"
+#define OWN_PREFIX "com.abbiedoobie.crosshair"
+#define CONFIG_DIR "/home/root/.config/com.abbiedoobie.crosshair"
 #define CONFIG_FILE CONFIG_DIR "/config.json"
-#define LOG_IDENT "org.abbie.crosshair"
+#define LOG_IDENT "com.abbiedoobie.crosshair"
 //The /tmp folder is RAM (tmpfs) and emptied every boot, so a missing marker means this is
 //the first start since boot, rather than a restart (reinstall, crash) that should keep the
 //current on/off. The marker holds that on/off, so turning the crosshair on or off never
 //writes to the TV's storage.
-#define BOOT_MARKER "/tmp/org.abbie.crosshair.booted"
+#define BOOT_MARKER "/tmp/com.abbiedoobie.crosshair.booted"
+
+//Boot hook, run as root at boot by Homebrew Channel (run-parts, so no dots in the name). It
+//removes itself if Crosshair is uninstalled, keeps the service elevated (an update reinstalls
+//it without root), and starts it, which puts the crosshair back if auto-start is on. Runs in
+//the background so it doesn't hold up the other hooks.
+#define BOOT_HOOK "/var/lib/webosbrew/init.d/95-abbiedoobie-crosshair"
+#define BOOT_HOOK_TEXT \
+    "#!/bin/sh\n" \
+    "#Crosshair boot hook, written by its service (" SERVICE_ID ")\n" \
+    "SERVICE=" SERVICE_ID "\n" \
+    "[ -d /media/developer/apps/usr/palm/services/$SERVICE ] || { rm -f \"$0\"; exit 0; }\n" \
+    "(\n" \
+    "    /media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/elevate-service $SERVICE\n" \
+    "    luna-send -n 1 luna://$SERVICE/start '{}'\n" \
+    ") >/dev/null 2>&1 &\n" \
+    "exit 0\n"
 
 //Settings changes arrive in bursts while the panel is open. Save once things go quiet, or
 //right away when the panel closes (its subscription ends) or the TV powers down.
@@ -852,6 +874,25 @@ static bool m_status(LSHandle *h, LSMessage *msg, void *ctx)
     return true;
 }
 
+//Exit cleanly after the reply goes out. The supervisor doesn't restart a clean exit, so
+//the hub starts a fresh service on the next call (as root, once elevated).
+static gboolean restart_cb(gpointer data)
+{
+    (void)data;
+    log_info("RESTART_REQUEST", "restarting on request");
+    save_now();
+    g_main_loop_quit(loop);
+    return G_SOURCE_REMOVE;
+}
+
+static bool m_restart(LSHandle *h, LSMessage *msg, void *ctx)
+{
+    (void)h; (void)ctx;
+    reply(msg, "{\"returnValue\":true}");
+    g_timeout_add(200, restart_cb, NULL);
+    return true;
+}
+
 static bool m_start(LSHandle *h, LSMessage *msg, void *ctx)
 {
     (void)h; (void)ctx;
@@ -870,6 +911,7 @@ static LSMethod methods[] = {
     { "button", m_button, LUNA_METHOD_FLAGS_NONE },
     { "status", m_status, LUNA_METHOD_FLAGS_NONE },
     { "start", m_start, LUNA_METHOD_FLAGS_NONE },
+    { "restart", m_restart, LUNA_METHOD_FLAGS_NONE },
     { NULL, NULL, LUNA_METHOD_FLAGS_NONE },
 };
 
@@ -883,6 +925,23 @@ static gboolean on_term(gpointer data)
     save_now();
     g_main_loop_quit(loop);
     return G_SOURCE_REMOVE;
+}
+
+//Write the boot hook if it's missing or out of date
+static void install_boot_hook(void)
+{
+    char *current = read_file(BOOT_HOOK);
+    bool same = current && strcmp(current, BOOT_HOOK_TEXT) == 0;
+    g_free(current);
+    if (same) return;
+    GError *gerr = NULL;
+    if (g_mkdir_with_parents("/var/lib/webosbrew/init.d", 0755) != 0
+        || !g_file_set_contents(BOOT_HOOK, BOOT_HOOK_TEXT, -1, &gerr) || chmod(BOOT_HOOK, 0755) != 0) {
+        log_error("BOOT_HOOK", "can't write %s: %s", BOOT_HOOK, gerr ? gerr->message : strerror(errno));
+        if (gerr) g_error_free(gerr);
+        return;
+    }
+    log_info("BOOT_HOOK", "installed %s", BOOT_HOOK);
 }
 
 static bool fail(const char *what, LSError *err)
@@ -912,7 +971,8 @@ static int service_main(void)
     g_unix_signal_add(SIGINT, on_term, NULL);
 
     log_info("STARTED", "service started");
-    if (!elevated) log_warn("NOT_ROOT", "running without root (not elevated): settings may not be kept");
+    if (elevated) install_boot_hook();
+    else log_warn("NOT_ROOT", "running without root (not elevated): settings may not be kept");
     if (access(BOOT_MARKER, F_OK) != 0) {
         //Write the marker first, so it exists even when the rule leaves on/off as it was.
         //Worst case (can't write it), the rule runs again on the next start.

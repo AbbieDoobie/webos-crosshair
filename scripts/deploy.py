@@ -6,8 +6,8 @@ Usage: python scripts/deploy.py <ssh-host>
 The TV needs root SSH from the Homebrew Channel. Run scripts/build.py first.
 
 Steps, all on the TV: install the IPK, elevate the service to root with the Homebrew
-Channel's elevate-service, put the boot hook in /var/lib/webosbrew/init.d, and restart the
-service, which relaunches the app with the new code if the crosshair is on.
+Channel's elevate-service, and restart the service. Once root, the service writes its own
+boot hook, and it relaunches the app with the new code if the crosshair is on.
 """
 import subprocess
 import sys
@@ -15,10 +15,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
-BOOT_HOOK = ROOT / "crosshair" / "boot" / "95-abbie-crosshair"
 
-APP = "org.abbie.crosshair"
-SERVICE = "org.abbie.crosshair.service"
+APP = "com.abbiedoobie.crosshair"
+SERVICE = "com.abbiedoobie.crosshair.service"
 
 REMOTE = r"""
 set -e
@@ -65,15 +64,11 @@ install_ipk __APP__ /tmp/__IPK__ __VERSION__
 "$HBC/elevate-service" __SERVICE__ >/tmp/crosshair-elevate.log 2>&1 || { echo "elevate failed:"; cat /tmp/crosshair-elevate.log; exit 1; }
 echo "elevated __SERVICE__"
 
-cp /tmp/95-abbie-crosshair /var/lib/webosbrew/init.d/95-abbie-crosshair
-chmod 755 /var/lib/webosbrew/init.d/95-abbie-crosshair
-echo "boot hook installed"
-
 pkill -f "__SERVICE__" 2>/dev/null || true
 sleep 1
 luna-send -n 1 luna://__SERVICE__/start '{}'
 echo
-rm -f /tmp/org.abbie.crosshair*.ipk /tmp/95-abbie-crosshair
+rm -f /tmp/com.abbiedoobie.crosshair*.ipk
 """
 
 
@@ -89,7 +84,7 @@ def main() -> None:
     #beats 0.9.0.
     ipk = max(found, key=lambda p: tuple(int(x) for x in p.name.split("_")[1].split(".")))
 
-    subprocess.run(["scp", "-q", str(ipk), str(BOOT_HOOK), f"{host}:/tmp/"], check=True)
+    subprocess.run(["scp", "-q", str(ipk), f"{host}:/tmp/"], check=True)
 
     script = (REMOTE.replace("__IPK__", ipk.name).replace("__VERSION__", ipk.name.split("_")[1])
               .replace("__APP__", APP).replace("__SERVICE__", SERVICE))

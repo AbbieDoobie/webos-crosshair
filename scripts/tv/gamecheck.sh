@@ -11,8 +11,8 @@ snap() {
   luna-send -n 1 luna://com.webos.settingsservice/getSystemSettings '{"category":"picture","keys":["pictureMode"]}' | grep -oE '"(pictureMode|dynamicRange)": *"[^"]*"' | tr '\n' ' '; echo
 }
 echo "before:"; snap
-luna-send -n 1 luna://org.abbie.crosshair.service/show '{}' >/dev/null; sleep 3
+luna-send -n 1 luna://com.abbiedoobie.crosshair.service/show '{}' >/dev/null; sleep 3
 echo "with crosshair:"; snap
 luna-send -n 1 luna://com.webos.surfacemanager/getFocusedWindowInfo '{}' | grep -o '"appId": "[^"]*"' | head -1
-luna-send -n 1 luna://org.abbie.crosshair.service/hide '{}' >/dev/null; sleep 2
+luna-send -n 1 luna://com.abbiedoobie.crosshair.service/hide '{}' >/dev/null; sleep 2
 echo "after:"; snap

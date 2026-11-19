@@ -10,7 +10,7 @@
 (function () {
     'use strict';
 
-    var SERVICE = 'luna://org.abbie.crosshair.service/';
+    var SERVICE = 'luna://com.abbiedoobie.crosshair.service/';
     var RETRY_MS = 2000;
 
     //Nothing is drawn until the service answers, so a crosshair that is meant to be off

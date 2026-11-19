@@ -1,11 +1,11 @@
 {
-    "id": "org.abbie.crosshair.service",
+    "id": "com.abbiedoobie.crosshair.service",
     "description": "Crosshair settings and keep-alive service",
     "engine": "native",
     "executable": "crosshair-service",
     "services": [
         {
-            "name": "org.abbie.crosshair.service",
+            "name": "com.abbiedoobie.crosshair.service",
             "description": "Crosshair settings and keep-alive service"
         }
     ]

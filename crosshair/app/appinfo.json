@@ -1,10 +1,11 @@
 {
-    "id": "org.abbie.crosshair",
-    "version": "0.6.1",
+    "id": "com.abbiedoobie.crosshair",
+    "version": "0.6.2",
     "vendor": "Abbie Doobie",
     "type": "web",
     "main": "index.html",
     "title": "Crosshair",
+    "appDescription": "A crosshair on top of whatever your TV is showing",
     "icon": "icon.png",
     "largeIcon": "largeIcon.png",
     "resolution": "1920x1080",

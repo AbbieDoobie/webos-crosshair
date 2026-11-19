@@ -6,6 +6,10 @@
  * the panel holds a getConfig subscription with panel: true, which tells the service to
  * keep the app loaded even with the crosshair off.
  *
+ * The service needs root, which comes from Homebrew Channel. If it isn't root yet (a fresh
+ * install), the panel asks Homebrew Channel to elevate it, then restarts it so it comes back
+ * as root. The warning under the title only shows if that fails.
+ *
  * Every change goes straight to the service. While the crosshair shows, it shows each
  * change. While it doesn't, this panel draws a preview of it whenever a look setting is
  * selected, with the same drawing code.
@@ -17,7 +21,9 @@
 (function () {
     'use strict';
 
-    var SERVICE = 'luna://org.abbie.crosshair.service/';
+    var SERVICE_ID = 'com.abbiedoobie.crosshair.service';
+    var SERVICE = 'luna://' + SERVICE_ID + '/';
+    var HBCHANNEL = 'luna://org.webosbrew.hbchannel.service/';
     var C = CrosshairConfig;
 
     var KEY = { LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40, OK: 13, BACK: 461, ESC: 27 };
@@ -32,6 +38,10 @@
     var config = null;
     var hdr = false;            //The TV is showing HDR, so HDR brightness is in use
     var dotShown = false;       //The crosshair is on screen (the service's show flag)
+    //Root setup, tried once per page: '' (not needed or not tried), 'running' (asking Homebrew
+    //Channel), 'restarted' (waiting for the old service to drop), 'reconnecting' (waiting for
+    //the new one), 'done', or 'failed'
+    var rootSetup = '';
     var selectedKey = 'visible';
     var requestSeq = 0;         //Sequence number of the newest setConfig sent
     var inFlight = 0;           //Number of setConfig calls not yet answered
@@ -227,16 +237,45 @@
         messageEl.textContent = text || '';
     }
 
-    //Warn when the service answers but isn't root: settings won't be kept, and the crosshair
-    //won't follow the TV's power state reliably.
-    function showElevationWarning(show) {
-        if (!warningEl || warningEl.hidden === !show) return;
-        warningEl.hidden = !show;
-        warningEl.textContent = show
-            ? 'The service isn’t running as root, so settings may not be kept. ' +
-              'On the TV, run elevate-service org.abbie.crosshair.service, then reboot.'
-            : '';
+    //Show a line under the title, or hide it with an empty text
+    function showWarning(text) {
+        if (!warningEl || warningEl.textContent === text) return;
+        warningEl.hidden = !text;
+        warningEl.textContent = text;
         updateScrollFade();
+    }
+
+    //Get the service elevated if it isn't root yet. Without root, settings aren't kept and
+    //the crosshair won't follow the TV's power state reliably. Homebrew Channel's elevateService
+    //patches the service's permissions; the restart brings it back as root, and the
+    //subscription picks it up again by itself.
+    function checkRoot(elevated) {
+        if (elevated !== false) {
+            if (rootSetup && rootSetup !== 'failed') rootSetup = 'done';
+            if (rootSetup !== 'failed') showWarning('');
+            return;
+        }
+        //The old service can still answer before it exits, so only the new one counts
+        if (rootSetup === 'running' || rootSetup === 'restarted') return;
+        if (rootSetup === 'reconnecting' || rootSetup === 'failed' || rootSetup === 'done') {
+            rootSetup = 'failed';
+            showWarning('Crosshair needs root access from the Homebrew Channel, and couldn’t get it, so ' +
+                'settings may not be kept. Check that the TV is rooted and the Homebrew Channel is installed.');
+            return;
+        }
+        rootSetup = 'running';
+        showWarning('Setting up root access through the Homebrew Channel…');
+        Luna.call(HBCHANNEL + 'elevateService', { id: SERVICE_ID }, function (reply) {
+            if (reply.returnValue === false) {
+                rootSetup = 'failed';
+                checkRoot(false);
+                return;
+            }
+            Luna.call(SERVICE + 'restart', {}, function (r) {
+                rootSetup = r.returnValue === false ? 'failed' : 'restarted';
+                if (rootSetup === 'failed') checkRoot(false);
+            });
+        });
     }
 
     function valueText(row) {
@@ -433,14 +472,16 @@
         var handle = Luna.subscribe(SERVICE + 'getConfig', { panel: true }, function (reply) {
             if (token !== current) return;      //Closed, or replaced by a retry
             if (reply.returnValue === false || reply.subscribed === false) {
-                showMessage('Crosshair service not responding. Is it installed and elevated?');
+                if (rootSetup === 'restarted') rootSetup = 'reconnecting';
+                showMessage(rootSetup === 'reconnecting' ? 'Restarting the Crosshair service…'
+                    : 'Crosshair service not responding, retrying…');
                 if (handle) handle.cancel();
                 subscription = current = null;
                 retryTimer = setTimeout(subscribe, RETRY_MS);
                 return;
             }
             showMessage('');
-            showElevationWarning(reply.elevated === false);
+            checkRoot(reply.elevated);
             if (typeof reply.show === 'boolean' && reply.show !== dotShown) {
                 dotShown = reply.show;
                 if (config) renderPreview();

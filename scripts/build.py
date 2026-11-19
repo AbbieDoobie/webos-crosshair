@@ -1,6 +1,8 @@
-"""Build the crosshair's IPK into build/.
+"""Build the crosshair's IPK into build/, with its Homebrew Channel manifest.
 
-  org.abbie.crosshair_<v>_all.ipk  the app (crosshair and settings panel) + root service
+  com.abbiedoobie.crosshair_<v>_all.ipk         the app (crosshair and settings panel) + root service
+  com.abbiedoobie.crosshair.manifest.json       for the Homebrew Channel repository; attach
+                                                both to the GitHub release v<v>
 
 Usage: python scripts/build.py
 Needs `ares-package` (npm @webos-tools/cli, Node.js 20+) on PATH, and the buildroot-nc4
@@ -8,6 +10,7 @@ webOS toolchain for the native service (crosshair/native): on Windows in WSL (di
 CROSSHAIR_WSL_DISTRO, default Ubuntu-24.04), elsewhere on this machine. See
 scripts/build-native.sh.
 """
+import hashlib
 import io
 import json
 import os
@@ -24,6 +27,12 @@ STAGE = BUILD / "stage"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import icons  # noqa: E402
+
+APP_ID = "com.abbiedoobie.crosshair"
+REPO = "https://github.com/AbbieDoobie/webos-crosshair"
+#The store links the icon straight from the repository, so it's kept in assets/
+ICON = ROOT / "assets" / "icon130.png"
+ICON_URL = "https://raw.githubusercontent.com/AbbieDoobie/webos-crosshair/main/assets/icon130.png"
 
 #Shared files the web app needs. The service is built separately (build_native).
 SHARED = ["luna.js", "config.js", "render.js"]
@@ -98,6 +107,37 @@ def make_executable(ipk: Path, member: str) -> None:
     ipk.write_bytes(bytes(out))
 
 
+def write_manifest(ipk: Path) -> Path:
+    """Write the Homebrew Channel manifest for this IPK, pointing at its GitHub release."""
+    appinfo = json.loads((SRC / "app" / "appinfo.json").read_text(encoding="utf-8"))
+    data = ipk.read_bytes()
+    manifest = {
+        "id": APP_ID,
+        "version": appinfo["version"],
+        "type": "web",
+        "title": appinfo["title"],
+        "appDescription": appinfo["appDescription"],
+        "iconUri": ICON_URL,
+        "sourceUrl": REPO,
+        "rootRequired": True,
+        "ipkUrl": f"{REPO}/releases/download/v{appinfo['version']}/{ipk.name}",
+        "ipkHash": {"sha256": hashlib.sha256(data).hexdigest()},
+        "ipkSize": len(data),
+    }
+    out = BUILD / f"{APP_ID}.manifest.json"
+    out.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
+    return out
+
+
+#Keep the store icon in step with the generated one
+def refresh_store_icon() -> None:
+    icon = icons.png(130)
+    if not ICON.exists() or ICON.read_bytes() != icon:
+        ICON.parent.mkdir(exist_ok=True)
+        ICON.write_bytes(icon)
+        print(f"updated {ICON.relative_to(ROOT)} (commit it)")
+
+
 def package(*dirs: Path) -> None:
     ares = shutil.which("ares-package")
     if not ares:
@@ -108,17 +148,19 @@ def package(*dirs: Path) -> None:
 def main() -> None:
     if STAGE.exists():
         shutil.rmtree(STAGE)
-    for ipk in BUILD.glob("*.ipk"):
-        ipk.unlink()
+    for old in [*BUILD.glob("*.ipk"), *BUILD.glob("*.manifest.json")]:
+        old.unlink()
     STAGE.mkdir(parents=True)
 
     package(stage_app(), build_native())
-    ipk = next(BUILD.glob("org.abbie.crosshair_*_all.ipk"))
-    make_executable(ipk, "usr/palm/services/org.abbie.crosshair.service/crosshair-service")
+    ipk = next(BUILD.glob(f"{APP_ID}_*_all.ipk"))
+    make_executable(ipk, f"usr/palm/services/{APP_ID}.service/crosshair-service")
     shutil.rmtree(STAGE)
+    manifest = write_manifest(ipk)
+    refresh_store_icon()
 
-    for ipk in sorted(BUILD.glob("*.ipk")):
-        print(f"built {ipk.relative_to(ROOT)}")
+    print(f"built {ipk.relative_to(ROOT)}")
+    print(f"built {manifest.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":
