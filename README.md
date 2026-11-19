@@ -34,7 +34,7 @@ Made for console and PC games that don't have a crosshair of their own (or only 
 
 ## Initial Setup
 
-1. Install `org.abbie.crosshair_<version>_all.ipk`. If you're upgrading from a version before 0.6.0, also remove the old `org.abbie.crosshair.dot` app (for example in webOS Dev Manager); the crosshair is now part of the main app.
+1. Install `org.abbie.crosshair_<version>_all.ipk`.
 2. Elevate the service to root. This is needed once after every install:
 
    ```sh
@@ -157,7 +157,7 @@ The crosshair is two parts in one package, `org.abbie.crosshair`:
 - Requires root (Homebrew Channel). Without `elevate-service`, settings may not be kept and the power-on rule may not apply.
 - Only tested on an OLED C2 (OLED42C2PUA) with webOS 10.3.1, firmware 33.31.68.
 - Sizes are in 1080p units. The TV's graphics plane is 1080p, so on a 4K panel each unit is a 2x2 block of physical pixels, and half units can't be drawn.
-- With **Hide on Home and apps** off, Home and Back may not work properly while the crosshair is up.
+- With **Hide on Home and apps** off, the crosshair draws over Home and apps, and the Magic Remote pointer can't select anything under it (the arrow keys still work).
 - With auto-start on, the first remote button press right after a boot has occasionally been lost.
 
 ### Service API
@@ -202,7 +202,7 @@ python scripts/build.py
 python scripts/deploy.py <ssh-host>
 ```
 
-`build.py` stages the app with its shared files, generates the icons, builds the service, and writes the IPK to `build/`. `deploy.py` copies it to the TV, removes the separate dot app that versions before 0.6.0 installed, installs the IPK (checking the installed version and retrying once), elevates the service, installs the boot hook, and restarts the service. `<ssh-host>` is anything `ssh` accepts, such as `root@<tv-ip>` or a Host alias from your SSH config.
+`build.py` stages the app with its shared files, generates the icons, builds the service, and writes the IPK to `build/`. `deploy.py` copies it to the TV, installs the IPK (checking the installed version and retrying once), elevates the service, installs the boot hook, and restarts the service. `<ssh-host>` is anything `ssh` accepts, such as `root@<tv-ip>` or a Host alias from your SSH config.
 
 ### The service
 
@@ -211,7 +211,6 @@ The service is C, in `crosshair/native/`. It needs CMake and the [buildroot-nc4]
 - `scripts/gen_schema.py` writes the C settings table from `config.js`, so defaults, limits, and shapes stay in one place.
 - `scripts/native_parity.py <ssh-host>` runs a few thousand random settings patches through `config.js` and through the C code on the TV, and checks that they match.
 - `ares-package` takes file modes from the disk, and Windows has none, so `build.py` marks the service binary executable inside the IPK.
-- Before 0.5.0 the service was JavaScript on the TV's Node.js, which needed no toolchain but took about 7 MB of RAM instead of 0.4 MB. The git tag `js-service-final` has the last version with it.
 
 ### Development previews
 

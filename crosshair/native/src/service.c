@@ -2,8 +2,6 @@
  * org.abbie.crosshair.service: owns the crosshair settings and keeps the dot on screen.
  * The dot and the settings panel are one floating web app, org.abbie.crosshair. The service
  * keeps it loaded while the dot should show or the panel is open, and closes it otherwise.
- * It replaced the JS service in 0.5.0 (git tag js-service-final has the last JS version)
- * with the same methods, replies, files, and rules.
  *
  * Runs as root (Homebrew Channel's elevate-service). Event driven: a glib main loop with
  * four subscriptions (power state, the running-app list, the foreground app, and the
@@ -263,8 +261,7 @@ static void load_config(void)
     }
     stored_text(&config, saved_text, sizeof(saved_text));
 
-    //On a restart since boot, on/off comes from the marker. Versions before 0.4.2 left the
-    //marker empty and kept on/off in config.json, so that value stays as the fallback.
+    //On a restart since boot, on/off comes from the marker
     text = read_file(BOOT_MARKER);
     if (text) {
         jvalue_ref state = parse_json(text);
@@ -314,7 +311,7 @@ static gboolean save_timer_cb(gpointer data)
 static void write_visible_state(void)
 {
     FILE *f = fopen(BOOT_MARKER, "w");
-    if (!f) return;     //Worst case, a restart falls back to config.json
+    if (!f) return;     //Worst case, a restart comes back with it off
     fprintf(f, "{\"visible\":%s}", config_bool(&config, "visible") ? "true" : "false");
     fclose(f);
 }
@@ -611,8 +608,8 @@ static void on_foreground(jvalue_ref r)
     on_input = input;
     if (config_bool(&config, "visible") && config_bool(&config, "hideOutsideInputs")) {
         log_verbose("FOREGROUND", "%s%s", on_input ? "showing on " : "hiding for ", foreground_app);
+        broadcast();
     }
-    if (config_bool(&config, "visible") && config_bool(&config, "hideOutsideInputs")) broadcast();
     char reason[300];
     snprintf(reason, sizeof(reason), "back on %s", foreground_app);
     update_app(reason);
@@ -846,7 +843,7 @@ static bool m_status(LSHandle *h, LSMessage *msg, void *ctx)
     json_quote(power_state, power, sizeof(power));
     snprintf(payload, sizeof(payload),
              "{\"config\":%s,\"appLoaded\":%s,\"panelOpen\":%s,\"show\":%s,\"powerState\":%s,\"hdr\":%s,\"dynamicRange\":%s,"
-             "\"elevated\":%s,\"foregroundApp\":%s,\"onInput\":%s,\"engine\":\"native\","
+             "\"elevated\":%s,\"foregroundApp\":%s,\"onInput\":%s,"
              "\"returnValue\":true}",
              c, app_running == 1 ? "true" : "false", panel_open ? "true" : "false",
              dot_wanted() ? "true" : "false", power, hdr ? "true" : "false", range,

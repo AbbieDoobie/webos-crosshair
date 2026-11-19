@@ -2,7 +2,7 @@
 #  cmake -S crosshair/native -B build/native/cmake \
 #        -DCMAKE_TOOLCHAIN_FILE=<sdk>/share/buildroot/toolchainfile.cmake \
 #        -DSCHEMA_DIR=build/native/gen
-#scripts/build-native.sh does this (scripts/build.py --native calls it).
+#scripts/build-native.sh does this (scripts/build.py calls it).
 cmake_minimum_required(VERSION 3.10)
 project(crosshair_service C)
 

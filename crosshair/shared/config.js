@@ -1,7 +1,7 @@
 /*
  * Crosshair settings: defaults, limits, validation, and color helpers.
  *
- * Shared by the settings app (which needs the same limits and choices to draw its
+ * Shared by the settings panel (which needs the same limits and choices to draw its
  * controls) and the renderer, and the source of the native service's settings table
  * (scripts/gen_schema.py), so the service validates the same way. Written as a UMD-style
  * file so it loads with require() in Node (the build scripts) and with a <script> tag in a

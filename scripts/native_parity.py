@@ -5,7 +5,7 @@ Usage: python scripts/native_parity.py <ssh-host> [cases]
 Makes random settings patches (good values, edge values, wrong types, numeric strings,
 junk), merges each with merge() from config.js through Node, runs the same cases through
 build/native/cmake/config-test on the TV, and compares the JSON. Build with
-scripts/build.py --native first. Leaves nothing on the TV.
+scripts/build.py first. Leaves nothing on the TV.
 """
 import json
 import random
@@ -61,7 +61,7 @@ def main() -> None:
     host = sys.argv[1]
     count = int(sys.argv[2]) if len(sys.argv) == 3 else 3000
     if not TEST_BIN.exists():
-        sys.exit("build/native/cmake/config-test missing; run scripts/build.py --native")
+        sys.exit("build/native/cmake/config-test missing; run scripts/build.py")
 
     info = json.loads(subprocess.run(["node", "-e", INFO, str(CONFIG_JS)],
                                      check=True, capture_output=True, text=True).stdout)

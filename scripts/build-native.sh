@@ -1,6 +1,6 @@
 #!/bin/sh
 #Build the native service with the buildroot-nc4 webOS toolchain. Runs on Linux (on
-#Windows, scripts/build.py --native runs it in WSL). Needs build/native/gen/config_schema.h
+#Windows, scripts/build.py runs it in WSL). Needs build/native/gen/config_schema.h
 #from scripts/gen_schema.py first.
 #
 #TOOLCHAIN picks the SDK folder (default: ~/arm-webos-linux-gnueabi_sdk-buildroot).
