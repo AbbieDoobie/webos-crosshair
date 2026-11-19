@@ -103,11 +103,18 @@
                 resync();
                 return;
             }
-            if (seq === requestSeq && reply.config) {
-                config = reply.config;
-                render();
-            }
+            if (seq === requestSeq) takeConfig(reply.config);
         });
+    }
+
+    //Use the service's settings, redrawing only if they differ from what's shown (most
+    //replies just confirm the change already drawn)
+    function takeConfig(next) {
+        if (!next) return;
+        var same = !!config;
+        for (var key in next) if (!config || next[key] !== config[key]) { same = false; break; }
+        config = next;
+        if (!same) render();
     }
 
     //Work out how many steps one press moves, growing while Left/Right is held. Only for
@@ -157,20 +164,14 @@
     //a change that never happened
     function resync() {
         Luna.call(SERVICE + 'getConfig', {}, function (reply) {
-            if (reply.config && inFlight === 0) {
-                config = reply.config;
-                render();
-            }
+            if (inFlight === 0) takeConfig(reply.config);
         });
     }
 
     function resetConfig() {
         ++requestSeq;
         Luna.call(SERVICE + 'resetConfig', {}, function (reply) {
-            if (reply.config) {
-                config = reply.config;
-                render();
-            }
+            takeConfig(reply.config);
         });
     }
 
@@ -399,10 +400,7 @@
             }
             //While our own changes are in flight, the pushes are echoes of older values and
             //would make a held arrow key flicker backwards.
-            if (reply.config && inFlight === 0) {
-                config = reply.config;
-                render();
-            }
+            if (inFlight === 0) takeConfig(reply.config);
         });
     }
 

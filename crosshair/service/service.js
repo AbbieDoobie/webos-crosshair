@@ -38,15 +38,19 @@ var SETTINGS_APP_ID = 'org.abbie.crosshair';
 var CONFIG_DIR = '/home/root/.config/org.abbie.crosshair';
 var CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 var LOG_FILE = '/tmp/org.abbie.crosshair.log';
-//The /tmp folder is emptied every boot, so a missing marker means this is the first start
-//since boot, rather than a restart (reinstall, crash) that should keep the current on/off.
+//The /tmp folder is RAM (tmpfs) and emptied every boot, so a missing marker means this is
+//the first start since boot, rather than a restart (reinstall, crash) that should keep the
+//current on/off. The marker holds that on/off, so turning the crosshair on or off never
+//writes to the TV's storage.
 var BOOT_MARKER = '/tmp/org.abbie.crosshair.booted';
-var LOG_MAX_BYTES = 256 * 1024;
+var LOG_MAX_BYTES = 64 * 1024;  //Two files at most (log and .1), both in RAM
 
 //Match foreground apps that are a TV input. Anything else in front (Home, an app) hides the dot.
 var INPUT_APP = /^com\.webos\.app\.(hdmi\d+|livetv|externalinput\.)/;
 
-var SAVE_DELAY_MS = 750;        //Settings changes arrive in bursts while a value is held
+//Settings changes arrive in bursts while the panel is open. Save once things go quiet, or
+//right away when the panel closes (its subscription ends) or the TV powers down.
+var SAVE_DELAY_MS = 10000;
 var WAKE_DELAY_MS = 1500;       //Let the compositor settle after the screen comes on
 //Failsafe: budget for relaunching a dot app that died by itself, so a crashing app can't
 //loop forever.
@@ -58,6 +62,9 @@ var LAUNCH_BUDGET = 5;
 var PRESS_GAP_MS = 600;
 
 var service = new Service(SERVICE_ID);
+var logSize = -1;               //Bytes in LOG_FILE, so logging doesn't stat the file every line
+var savedText = '';             //What config.json holds now, to skip writes that change nothing
+var configDirReady = false;
 var config = loadConfig();
 var configSubscribers = [];
 var saveTimer = null;
@@ -84,46 +91,94 @@ var pressTimer = null;
 function log(level, text) {
     var line = new Date().toISOString() + ' ' + level + ' ' + text + '\n';
     try {
-        var st = fs.existsSync(LOG_FILE) ? fs.statSync(LOG_FILE) : null;
-        if (st && st.size > LOG_MAX_BYTES) fs.renameSync(LOG_FILE, LOG_FILE + '.1');
+        //Grab the size once, then count what we append
+        if (logSize < 0) {
+            try { logSize = fs.statSync(LOG_FILE).size; } catch (e) { logSize = 0; }
+        }
+        if (logSize > LOG_MAX_BYTES) {
+            fs.renameSync(LOG_FILE, LOG_FILE + '.1');
+            logSize = 0;
+        }
         fs.appendFileSync(LOG_FILE, line);
+        logSize += Buffer.byteLength(line);
     } catch (e) { /* Logging must NEVER take the service down */ }
 }
 
 //---------------------------------------------------------------------------------------
 //Settings storage.
 
+//Build the text config.json should hold. On/off isn't in it: the power-on rule sets it
+//after every boot, and a restart in between reads it from the boot marker in RAM.
+function storedText(c) {
+    var out = {};
+    for (var key in c) if (key !== 'visible') out[key] = c[key];
+    return JSON.stringify(out, null, 2);
+}
+
 function loadConfig() {
+    var c;
     try {
-        var parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-        return Config.merge(Config.DEFAULTS, parsed);
+        c = Config.merge(Config.DEFAULTS, JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')));
+        configDirReady = true;
     } catch (e) {
-        return Config.merge(Config.DEFAULTS, {});
+        c = Config.merge(Config.DEFAULTS, {});
+    }
+    savedText = storedText(c);
+    //On a restart since boot, on/off comes from the marker. Versions before 0.4.2 left the
+    //marker empty and kept on/off in config.json, so that value stays as the fallback.
+    try {
+        var state = JSON.parse(fs.readFileSync(BOOT_MARKER, 'utf8'));
+        c = Config.merge(c, { visible: state.visible });
+    } catch (e) { /* No marker (first start since boot), or an old empty one */ }
+    return c;
+}
+
+function saveNow() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = null;
+    var text = storedText(config);
+    if (text === savedText) return;     //Changed and changed back, so nothing to write
+    try {
+        if (!configDirReady) {
+            fs.mkdirSync(CONFIG_DIR, { recursive: true });
+            configDirReady = true;
+        }
+        var tmp = CONFIG_FILE + '.tmp';
+        fs.writeFileSync(tmp, text);
+        fs.renameSync(tmp, CONFIG_FILE);    //Atomic, so never a half-written file
+        savedText = text;
+    } catch (e) {
+        log('ERROR', 'save failed: ' + e.message);
     }
 }
 
-function scheduleSave() {
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(function () {
-        saveTimer = null;
-        try {
-            fs.mkdirSync(CONFIG_DIR, { recursive: true });
-            var tmp = CONFIG_FILE + '.tmp';
-            fs.writeFileSync(tmp, JSON.stringify(config, null, 2));
-            fs.renameSync(tmp, CONFIG_FILE);    //Atomic, so never a half-written file
-        } catch (e) {
-            log('ERROR', 'save failed: ' + e.message);
-        }
-    }, SAVE_DELAY_MS);
+//Keep on/off in the boot marker (RAM), so a service restart picks it back up
+function writeVisibleState() {
+    try {
+        fs.writeFileSync(BOOT_MARKER, JSON.stringify({ visible: config.visible }));
+    } catch (e) { /* Worst case, a restart falls back to config.json */ }
+}
+
+function sameConfig(a, b) {
+    for (var key in a) if (a[key] !== b[key]) return false;
+    return true;
 }
 
 function applyConfig(next) {
-    var changed = JSON.stringify(next) !== JSON.stringify(config);
+    var changed = !sameConfig(next, config);
     var visibilityChanged = next.visible !== config.visible;
     var hideChanged = next.hideOutsideInputs !== config.hideOutsideInputs;
     config = next;
     if (!changed) return;
-    scheduleSave();
+    if (visibilityChanged) writeVisibleState();
+    //Only a stored setting needs a save; a change that was undone cancels the pending one
+    if (storedText(config) !== savedText) {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(saveNow, SAVE_DELAY_MS);
+    } else if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+    }
     broadcast();
     if (visibilityChanged) log('INFO', 'crosshair ' + (config.visible ? 'on' : 'off'));
     if (visibilityChanged || hideChanged) {
@@ -268,6 +323,8 @@ function watchPower() {
         var previous = powerState;
         powerState = state;
         log('INFO', 'power state ' + previous + ' -> ' + state);
+        //Write any pending settings before a power-down can cut them off
+        if (UP_STATES.indexOf(state) < 0) saveNow();
         if (state !== 'Active') return;
         //Semi-sleep restores the window by itself and needs nothing.
         if (UP_STATES.indexOf(previous) >= 0) return;
@@ -297,6 +354,8 @@ service.register('getConfig', function (msg) {
 }, function (msg) {
     var i = configSubscribers.indexOf(msg);
     if (i >= 0) configSubscribers.splice(i, 1);
+    //The settings panel (or the dot app) closed, so the burst of changes is over
+    if (saveTimer) saveNow();
 });
 
 service.register('setConfig', function (msg) {
@@ -391,7 +450,9 @@ function applyPowerOnRule(reason) {
 
 log('INFO', 'service started' + (elevated ? '' : ' WITHOUT ROOT (not elevated)'));
 if (!fs.existsSync(BOOT_MARKER)) {
-    try { fs.writeFileSync(BOOT_MARKER, ''); } catch (e) { /* Worst case, the rule runs again on the next start */ }
+    //Write the marker first, so it exists even when the rule leaves on/off as it was.
+    //Worst case (can't write it), the rule runs again on the next start.
+    writeVisibleState();
     applyPowerOnRule('boot');
 }
 watchPower();

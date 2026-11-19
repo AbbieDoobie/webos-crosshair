@@ -190,6 +190,7 @@
     }
 
     function clear(svg) {
+        if (svg.__crosshairKey === '') return;  //Already empty
         svg.__crosshairKey = '';
         while (svg.firstChild) svg.removeChild(svg.firstChild);
     }
@@ -210,15 +211,22 @@
         });
     }
 
+    //Build a key from only what shows on screen, so switches like auto-start and the
+    //brightness that isn't in use don't redraw anything
+    function lookKey(c, factor) {
+        return [c.shape, c.color, factor, c.opacity, c.size, c.thickness, c.gap,
+            c.outline, c.outlineColor, c.outlineWidth, c.offsetX, c.offsetY].join('|');
+    }
+
     function draw(svg, c, opts) {
         var hdr = !!(opts && opts.hdr);
-        var key = JSON.stringify(c) + (hdr ? '/hdr' : '');
+        var factor = hdr ? c.hdrBrightness : c.brightness;
+        var key = lookKey(c, factor);
         if (key === svg.__crosshairKey) return;
         clear(svg);
         svg.__crosshairKey = key;
 
         var C = root.CrosshairConfig;
-        var factor = hdr ? c.hdrBrightness : c.brightness;
         var color = C.scaleColor(c.color, factor);
         var outlineColor = C.scaleColor(c.outlineColor, factor);
 

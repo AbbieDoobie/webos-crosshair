@@ -133,7 +133,8 @@ The crosshair is three parts in two packages:
 - The dot is a `floating` window: a compositor layer above the full-screen input and below the TV's own menus. Unlike overlay windows, it isn't closed by the compositor's 2-minute idle timer and doesn't take remote focus.
 - Off closes the dot app entirely, since a loaded floating window interferes with Home and Back. Turning it on relaunches it in about half a second (the first launch after an install takes several seconds).
 - The service is event driven, with no polling loops. It subscribes to the power state, the running-app list, the foreground app, and the picture settings, and does nothing between events.
-- **Power-on rule.** After a boot or a wake from standby, `visible` is set to `autoStart`. A restart of the service alone (reinstall, crash) keeps the current state; `/tmp/org.abbie.crosshair.booted` marks that the boot already happened.
+- **Storage writes.** Turning the crosshair on or off never writes to the TV's storage: on/off lives in RAM (`/tmp`), and the power-on rule sets it after every boot. Other settings are saved to `config.json` once changes stop for 10 seconds, when the settings panel closes, or when the TV powers down, and only if something actually changed.
+- **Power-on rule.** After a boot or a wake from standby, `visible` is set to `autoStart`. A restart of the service alone (reinstall, crash) keeps the current state; `/tmp/org.abbie.crosshair.booted` marks that the boot already happened and holds the on/off state.
 - **HDR detection.** The `dynamicRange` dimension of the picture settings (for example `hdrALLM`) selects `hdrBrightness` over `brightness`.
 - **Hide on Home and apps.** The first non-crosshair entry in `getForegroundAppInfo` is the main app. Only `com.webos.app.hdmi*`, `livetv`, and `externalinput.*` count as inputs.
 - The dot app is relaunched automatically if it dies on its own, up to 5 times a minute.
@@ -170,8 +171,9 @@ All methods are at `luna://org.abbie.crosshair.service/<method>`.
 
 | Path | Contents |
 |---|---|
-| `/home/root/.config/org.abbie.crosshair/config.json` | Saved settings |
-| `/tmp/org.abbie.crosshair.log` | Service log (cleared every boot) |
+| `/home/root/.config/org.abbie.crosshair/config.json` | Saved settings (everything but on/off) |
+| `/tmp/org.abbie.crosshair.booted` | Boot marker and the current on/off (cleared every boot) |
+| `/tmp/org.abbie.crosshair.log` | Service log, up to 64 KB plus one older file (cleared every boot) |
 | `/var/lib/webosbrew/init.d/95-abbie-crosshair` | Boot hook |
 
 ## Building
