@@ -185,7 +185,18 @@ html, body {
 }
 
 #hint {
-    padding: 16px 32px 0;
+    display: flex;
+    align-items: baseline;
+    padding: 16px 20px 0 32px;
     font-size: 19px;
     color: rgba(255, 255, 255, 0.5);
+}
+
+/* App version, at the far right of the hint line. */
+#version {
+    margin-left: auto;
+    padding-left: 18px;
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.35);
+    white-space: nowrap;
 }

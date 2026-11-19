@@ -28,7 +28,7 @@
     <div id="warning" hidden></div>
     <div id="rows"></div>
     <div id="message"></div>
-    <div id="hint">&#9650;&#9660; choose &nbsp;&middot;&nbsp; &#9664;&#9654; change &nbsp;&middot;&nbsp; OK select &nbsp;&middot;&nbsp; BACK close</div>
+    <div id="hint"><span>&#9650;&#9660; choose &nbsp;&middot;&nbsp; &#9664;&#9654; change &nbsp;&middot;&nbsp; OK select &nbsp;&middot;&nbsp; BACK close</span><span id="version"></span></div>
 </div>
 </div>
 <script>
@@ -44,5 +44,10 @@
 <script src="../crosshair/shared/render.js"></script>
 <script src="../crosshair/app/settings.js"></script>
 <script src="../crosshair/app/crosshair.js"></script>
+<script>
+    //Show the version from appinfo.json, like build.py does for the real app
+    fetch('../crosshair/app/appinfo.json').then(function (r) { return r.json(); })
+        .then(function (a) { document.getElementById('version').textContent = 'v' + a.version; });
+</script>
 </body>
 </html>

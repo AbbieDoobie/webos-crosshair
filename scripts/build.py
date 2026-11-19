@@ -9,6 +9,7 @@ CROSSHAIR_WSL_DISTRO, default Ubuntu-24.04), elsewhere on this machine. See
 scripts/build-native.sh.
 """
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -31,6 +32,10 @@ SHARED = ["luna.js", "config.js", "render.js"]
 def stage_app() -> Path:
     out = STAGE / "app"
     shutil.copytree(SRC / "app", out)
+    #Fill in the version the panel shows, from appinfo.json
+    version = json.loads((out / "appinfo.json").read_text(encoding="utf-8"))["version"]
+    page = out / "index.html"
+    page.write_bytes(page.read_bytes().replace(b"__VERSION__", version.encode()))
     for f in SHARED:
         shutil.copy2(SRC / "shared" / f, out / f)
     icons.write(out)
