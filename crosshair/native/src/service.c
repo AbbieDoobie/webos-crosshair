@@ -1,5 +1,7 @@
 /*
  * org.abbie.crosshair.service: owns the crosshair settings and keeps the dot on screen.
+ * The dot and the settings panel are one floating web app, org.abbie.crosshair. The service
+ * keeps it loaded while the dot should show or the panel is open, and closes it otherwise.
  * It replaced the JS service in 0.5.0 (git tag js-service-final has the last JS version)
  * with the same methods, replies, files, and rules.
  *
@@ -8,27 +10,33 @@
  * picture settings for HDR), and nothing running between events.
  *
  * Methods (luna://org.abbie.crosshair.service/<method>):
- *   getConfig {subscribe}   current settings, whether the picture is HDR, and whether
- *                           the service runs as root; with subscribe, a reply after
- *                           every change
+ *   getConfig {subscribe}   current settings, whether the dot should be on screen now
+ *                           (show), whether the picture is HDR, and whether the service
+ *                           runs as root; with subscribe, a reply after every change.
+ *                           The panel subscribes with panel: true, which keeps the app
+ *                           loaded until it cancels
  *   setConfig {config}      apply a partial settings object; invalid fields are skipped
  *                           and keep their current value
  *   resetConfig             defaults for the look, keeping on/off, auto-start, and the
- *                           triple-press and hide-outside-inputs settings as they are
+ *                           triple-press, hide-outside-inputs, and logging settings as they are
  *   show / hide / toggle    turn the crosshair on or off
  *   button                  the remote button (Input Hook calls this): one press toggles;
  *                           with tripleOpensSettings, three quick presses open the panel
- *   status                  settings plus whether the dot app is loaded, and the power state
+ *   status                  settings plus whether the app is loaded, whether the panel is
+ *                           open, and the power state
  *   start                   no-op; the boot hook calls it to start the service
  *
  * Power-on rule: after the TV boots or wakes from standby, the crosshair is on if
  * auto-start is on, and off otherwise. The dim "Screen Off" state isn't a power-on.
  *
- * With hideOutsideInputs, the dot app is also closed while Home or an app is in front, and
+ * With hideOutsideInputs, the dot is also hidden while Home or an app is in front, and
  * comes back on an input (HDMI, live TV, AV). The on/off setting itself doesn't change.
  *
  * Crash recovery: the process the hub starts supervises the service in a child process and
  * restarts it a second after it dies abnormally, up to 5 times a minute (see supervise()).
+ *
+ * Logging goes to the system log (syslog, tagged org.abbie.crosshair): start, stop,
+ * warnings, and errors always, and everything else only with verboseLogging on.
  */
 #include <ctype.h>
 #include <errno.h>
@@ -45,30 +53,32 @@
 
 #include <glib.h>
 #include <glib-unix.h>
+#include <syslog.h>
 #include <luna-service2/lunaservice.h>
 #include <pbnjson.h>
 
 #include "config.h"
 
 #define SERVICE_ID "org.abbie.crosshair.service"
-#define DOT_APP_ID "org.abbie.crosshair.dot"
-#define SETTINGS_APP_ID "org.abbie.crosshair"
+#define APP_ID "org.abbie.crosshair"
 #define OWN_PREFIX "org.abbie.crosshair"
 #define CONFIG_DIR "/home/root/.config/org.abbie.crosshair"
 #define CONFIG_FILE CONFIG_DIR "/config.json"
-#define LOG_FILE "/tmp/org.abbie.crosshair.log"
+#define LOG_IDENT "org.abbie.crosshair"
 //The /tmp folder is RAM (tmpfs) and emptied every boot, so a missing marker means this is
 //the first start since boot, rather than a restart (reinstall, crash) that should keep the
 //current on/off. The marker holds that on/off, so turning the crosshair on or off never
 //writes to the TV's storage.
 #define BOOT_MARKER "/tmp/org.abbie.crosshair.booted"
-#define LOG_MAX_BYTES (64 * 1024)   //Two files at most (log and .1), both in RAM
 
 //Settings changes arrive in bursts while the panel is open. Save once things go quiet, or
 //right away when the panel closes (its subscription ends) or the TV powers down.
 #define SAVE_DELAY_MS 10000
 #define WAKE_DELAY_MS 1500          //Let the compositor settle after the screen comes on
-//Failsafe: budget for relaunching a dot app that died by itself, so a crashing app can't
+//An app started for its panel (from the app list or the triple press) is kept this long
+//for the panel to open, then closed if it didn't
+#define PANEL_GRACE_MS 10000
+//Failsafe: budget for relaunching an app that died by itself, so a crashing app can't
 //loop forever. Launches you cause (on/off, coming back to an input, waking) don't count.
 #define LAUNCH_WINDOW_MS 60000
 #define LAUNCH_BUDGET 5
@@ -94,7 +104,9 @@ static guint save_timer;
 //The tvpower states in which apps keep running. "Screen Off" is the dim semi-sleep: the
 //compositor hides the dot itself and shows it again on wake, so it counts as up.
 static char power_state[32] = "Active";
-static int dot_running = -1;        //-1 = no reply yet. 1 = loaded. 0 = not running.
+static int app_running = -1;        //-1 = no reply yet. 1 = loaded. 0 = not running.
+static bool panel_open;             //The panel holds a getConfig subscription with panel: true
+static guint grace_timer;           //Running while a panel is expected (expect_panel)
 static char foreground_app[256];    //The app in front, from the foreground subscription
 static bool on_input = true;        //An input is in front (assumed until the first reply)
 static bool hdr;                    //The TV is showing an HDR picture (picks hdrBrightness)
@@ -108,47 +120,36 @@ static bool elevated;
 static int press_count;
 static guint press_timer;
 
-static FILE *log_fp;
-static long log_size = -1;
-
 //---------------------------------------------------------------------------------------
-//Logging. Keep a short file in /tmp (cleared every boot), trimmed when it grows.
+//Logging, to the system log through syslog. The TV keeps syslog lines in its legacy log
+//(/var/log/legacy-log, in RAM), tagged LOG_IDENT. PmLog would be the webOS way, but the TV
+//drops PmLog lines from homebrew unless its developer log recording is switched on.
+//Start, stop, warnings, and errors are always logged; everything else (presses, launches,
+//the panel, power, and the picture) only while the Verbose logging setting is on. Each line
+//starts with an ID, to make it easy to grep for.
 
-static void log_line(const char *level, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
+static void log_msg(int priority, const char *msgid, const char *fmt, ...) G_GNUC_PRINTF(3, 4);
 
-static void log_line(const char *level, const char *fmt, ...)
+static void log_msg(int priority, const char *msgid, const char *fmt, ...)
 {
-    char stamp[40];
-    struct timespec ts;
-    struct tm tm;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    gmtime_r(&ts.tv_sec, &tm);
-    size_t len = strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%S", &tm);
-    snprintf(stamp + len, sizeof(stamp) - len, ".%03ldZ", ts.tv_nsec / 1000000);
-
-    //Grab the size once, then count what we append
-    if (log_size < 0) {
-        struct stat st;
-        log_size = (stat(LOG_FILE, &st) == 0) ? (long)st.st_size : 0;
+    static bool opened;
+    if (!opened) {
+        openlog(LOG_IDENT, LOG_PID, LOG_USER);
+        opened = true;
     }
-    if (log_size > LOG_MAX_BYTES) {
-        if (log_fp) { fclose(log_fp); log_fp = NULL; }
-        rename(LOG_FILE, LOG_FILE ".1");
-        log_size = 0;
-    }
-    if (!log_fp) {
-        log_fp = fopen(LOG_FILE, "a");
-        if (!log_fp) return;    //Logging must NEVER take the service down
-        setvbuf(log_fp, NULL, _IOLBF, 0);
-    }
-    int n = fprintf(log_fp, "%s %s ", stamp, level);
+    char text[512];
     va_list ap;
     va_start(ap, fmt);
-    n += vfprintf(log_fp, fmt, ap);
+    vsnprintf(text, sizeof(text), fmt, ap);
     va_end(ap);
-    n += fprintf(log_fp, "\n");
-    if (n > 0) log_size += n;
+    syslog(priority, "%s %s", msgid, text);
 }
+
+#define log_error(id, ...) log_msg(LOG_ERR, id, __VA_ARGS__)
+#define log_warn(id, ...) log_msg(LOG_WARNING, id, __VA_ARGS__)
+#define log_info(id, ...) log_msg(LOG_INFO, id, __VA_ARGS__)
+#define log_verbose(id, ...) \
+    do { if (config_bool(&config, "verboseLogging")) log_msg(LOG_INFO, id, __VA_ARGS__); } while (0)
 
 //---------------------------------------------------------------------------------------
 //Small JSON helpers.
@@ -208,7 +209,7 @@ static void reply(LSMessage *msg, const char *payload)
     LSError err;
     LSErrorInit(&err);
     if (!LSMessageReply(sh, msg, payload, &err)) {
-        log_line("ERROR", "reply failed: %s", err.message ? err.message : "unknown");
+        log_error("REPLY_FAILED", "reply failed: %s", err.message ? err.message : "unknown");
         LSErrorFree(&err);
     }
 }
@@ -219,7 +220,7 @@ static void call_once(const char *uri, const char *payload, LSFilterFunc cb, voi
     LSError err;
     LSErrorInit(&err);
     if (!LSCallOneReply(sh, uri, payload, cb, ctx, NULL, &err)) {
-        log_line("ERROR", "call %s failed: %s", uri, err.message ? err.message : "unknown");
+        log_error("CALL_FAILED", "call %s failed: %s", uri, err.message ? err.message : "unknown");
         LSErrorFree(&err);
     }
 }
@@ -286,7 +287,7 @@ static void save_now(void)
 
     if (!config_dir_ready) {
         if (g_mkdir_with_parents(CONFIG_DIR, 0755) != 0) {
-            log_line("ERROR", "save failed: can't create %s: %s", CONFIG_DIR, strerror(errno));
+            log_error("SAVE_FAILED", "save failed: can't create %s: %s", CONFIG_DIR, strerror(errno));
             return;
         }
         config_dir_ready = true;
@@ -294,7 +295,7 @@ static void save_now(void)
     //Atomic, so never a half-written file
     GError *gerr = NULL;
     if (!g_file_set_contents(CONFIG_FILE, text, -1, &gerr)) {
-        log_line("ERROR", "save failed: %s", gerr ? gerr->message : "unknown");
+        log_error("SAVE_FAILED", "save failed: %s", gerr ? gerr->message : "unknown");
         if (gerr) g_error_free(gerr);
         return;
     }
@@ -319,18 +320,24 @@ static void write_visible_state(void)
 }
 
 //---------------------------------------------------------------------------------------
-//The dot app runs only while the crosshair is on.
+//The app runs only while the dot should show or the panel is open.
 //
-//Off closes it completely: a loaded floating window, even an empty one, stops the Home
-//menu from opening. Relaunching a previously loaded web app takes about 0.4 s.
+//Otherwise it's closed completely: a loaded floating window, even an empty one, stops the
+//Home menu from opening. Relaunching a previously loaded web app takes about 0.4 s.
 
 static void broadcast(void);
-static void close_dot(bool force);
+static void close_app(bool force);
 
 //Check if the dot should be on screen right now
-static bool wanted(void)
+static bool dot_wanted(void)
 {
     return config_bool(&config, "visible") && (on_input || !config_bool(&config, "hideOutsideInputs"));
+}
+
+//Check if the app should be loaded right now
+static bool app_wanted(void)
+{
+    return panel_open || grace_timer || dot_wanted();
 }
 
 static bool launch_reply_cb(LSHandle *h, LSMessage *msg, void *ctx)
@@ -341,19 +348,20 @@ static bool launch_reply_cb(LSHandle *h, LSMessage *msg, void *ctx)
     if (!get_bool(r, "returnValue", false)) {
         char text[256] = "unknown";
         get_string(r, "errorText", text, sizeof(text));
-        log_line("ERROR", "launch failed: %s", text);
-    } else if (!wanted()) {
-        close_dot(true);    //Turned off or hidden again while it was launching
+        log_error("LAUNCH_FAILED", "launch failed: %s", text);
+    } else if (!app_wanted()) {
+        close_app(true);    //Turned off or hidden again while it was launching
     }
     j_release(&r);
     return true;
 }
 
-static void ensure_dot(const char *reason, bool force, bool budgeted)
+//Launch the app for the dot. The dot parameter tells the page not to open its panel.
+static void ensure_app(const char *reason, bool force, bool budgeted)
 {
-    if (!wanted()) return;
+    if (!app_wanted()) return;
     if (!up_state(power_state) || launch_pending) return;
-    if (dot_running == 1 && !force) return;
+    if (app_running == 1 && !force) return;
 
     if (budgeted) {
         gint64 now = g_get_monotonic_time() / 1000;
@@ -363,30 +371,30 @@ static void ensure_dot(const char *reason, bool force, bool budgeted)
         }
         launch_count = kept;
         if (launch_count >= LAUNCH_BUDGET) {
-            log_line("WARN", "relaunch budget spent, not launching (%s)", reason);
+            log_warn("RELAUNCH_BUDGET", "relaunch budget spent, not launching (%s)", reason);
             return;
         }
         launch_times[launch_count++] = now;
     }
     launch_pending = true;
-    log_line("INFO", "launching dot app (%s)", reason);
+    log_verbose("APP_LAUNCH", "launching app (%s)", reason);
     call_once("luna://com.webos.applicationManager/launch",
-              "{\"id\":\"" DOT_APP_ID "\",\"noSplash\":true,\"spinner\":false}",
+              "{\"id\":\"" APP_ID "\",\"params\":{\"dot\":true},\"noSplash\":true,\"spinner\":false}",
               launch_reply_cb, NULL);
 }
 
-static void close_dot(bool force)
+static void close_app(bool force)
 {
-    if (dot_running == 0 && !launch_pending && !force) return;
-    log_line("INFO", "closing dot app");
+    if (app_running == 0 && !launch_pending && !force) return;
+    log_verbose("APP_CLOSE", "closing app");
     call_once("luna://com.webos.applicationManager/closeByAppId",
-              "{\"id\":\"" DOT_APP_ID "\"}", NULL, NULL);
+              "{\"id\":\"" APP_ID "\"}", NULL, NULL);
 }
 
-static void update_dot(const char *reason)
+static void update_app(const char *reason)
 {
-    if (wanted()) ensure_dot(reason, false, false);
-    else close_dot(false);
+    if (app_wanted()) ensure_app(reason, false, false);
+    else close_app(false);
 }
 
 static void apply_config(const config_t *next)
@@ -394,8 +402,10 @@ static void apply_config(const config_t *next)
     bool changed = !config_equal(next, &config);
     bool visibility_changed = config_bool(next, "visible") != config_bool(&config, "visible");
     bool hide_changed = config_bool(next, "hideOutsideInputs") != config_bool(&config, "hideOutsideInputs");
+    bool verbose_changed = config_bool(next, "verboseLogging") != config_bool(&config, "verboseLogging");
     config = *next;
     if (!changed) return;
+    if (verbose_changed) log_info("VERBOSE_LOGGING", "verbose logging %s", config_bool(&config, "verboseLogging") ? "on" : "off");
     if (visibility_changed) write_visible_state();
 
     //Only a stored setting needs a save; a change that was undone cancels the pending one
@@ -405,9 +415,9 @@ static void apply_config(const config_t *next)
     if (strcmp(text, saved_text) != 0) save_timer = g_timeout_add(SAVE_DELAY_MS, save_timer_cb, NULL);
 
     broadcast();
-    if (visibility_changed) log_line("INFO", "crosshair %s", config_bool(&config, "visible") ? "on" : "off");
+    if (visibility_changed) log_verbose("CROSSHAIR", "crosshair %s", config_bool(&config, "visible") ? "on" : "off");
     if (visibility_changed || hide_changed) {
-        update_dot(visibility_changed ? "turned on" : "hide setting changed");
+        update_app(visibility_changed ? "turned on" : "hide setting changed");
     }
 }
 
@@ -421,29 +431,34 @@ static void set_visible(bool visible)
 static void apply_power_on_rule(const char *reason)
 {
     bool auto_start = config_bool(&config, "autoStart");
-    log_line("INFO", "%s: auto-start %s", reason, auto_start ? "on" : "off");
+    log_verbose("POWER_ON_RULE", "%s: auto-start %s", reason, auto_start ? "on" : "off");
     set_visible(auto_start);
 }
 
-//Build the getConfig reply: settings, HDR, root, and whether this is a subscription
+//Build the getConfig reply: settings, whether the dot shows, HDR, root, and whether this
+//is a subscription
 static void config_reply(char *buf, size_t size, bool subscribed, bool with_return)
 {
     char c[JSON_MAX];
     if (!config_json(&config, c, sizeof(c), false, NULL)) snprintf(c, sizeof(c), "{}");
-    snprintf(buf, size, "{\"config\":%s,\"hdr\":%s,\"elevated\":%s,\"subscribed\":%s%s}",
-             c, hdr ? "true" : "false", elevated ? "true" : "false",
-             subscribed ? "true" : "false", with_return ? ",\"returnValue\":true" : "");
+    snprintf(buf, size, "{\"config\":%s,\"show\":%s,\"hdr\":%s,\"elevated\":%s,\"subscribed\":%s%s}",
+             c, dot_wanted() ? "true" : "false", hdr ? "true" : "false",
+             elevated ? "true" : "false", subscribed ? "true" : "false",
+             with_return ? ",\"returnValue\":true" : "");
 }
 
 static void broadcast(void)
 {
     char payload[JSON_MAX + 256];
     config_reply(payload, sizeof(payload), true, true);
-    LSError err;
-    LSErrorInit(&err);
-    if (!LSSubscriptionReply(sh, "getConfig", payload, &err)) {
-        log_line("ERROR", "broadcast failed: %s", err.message ? err.message : "unknown");
-        LSErrorFree(&err);
+    static const char *keys[] = { "getConfig", "panel" };
+    for (size_t i = 0; i < G_N_ELEMENTS(keys); i++) {
+        LSError err;
+        LSErrorInit(&err);
+        if (!LSSubscriptionReply(sh, keys[i], payload, &err)) {
+            log_error("BROADCAST_FAILED", "broadcast failed: %s", err.message ? err.message : "unknown");
+            LSErrorFree(&err);
+        }
     }
 }
 
@@ -475,7 +490,7 @@ static bool watch_reply_cb(LSHandle *h, LSMessage *msg, void *ctx)
     (void)h;
     watch_t *w = (watch_t *)ctx;
     if (LSMessageIsHubErrorMessage(msg)) {
-        log_line("WARN", "%s subscription dropped, retrying", w->name);
+        log_warn("SUBSCRIPTION", "%s subscription dropped, retrying", w->name);
         LSError err;
         LSErrorInit(&err);
         if (w->token && !LSCallCancel(sh, w->token, &err)) LSErrorFree(&err);
@@ -494,7 +509,7 @@ static void watch_start(watch_t *w)
     LSError err;
     LSErrorInit(&err);
     if (!LSCall(sh, w->uri, w->payload, watch_reply_cb, w, &w->token, &err)) {
-        log_line("WARN", "%s subscription failed (%s), retrying", w->name,
+        log_warn("SUBSCRIPTION", "%s subscription failed (%s), retrying", w->name,
                  err.message ? err.message : "unknown");
         LSErrorFree(&err);
         w->token = 0;
@@ -514,12 +529,32 @@ static void on_picture(jvalue_ref r)
     low[i] = '\0';
     bool is_hdr = (strstr(low, "hdr") || strstr(low, "hlg") || strstr(low, "dolby") || strstr(low, "dv"))
         && strncmp(low, "sdr", 3) != 0;
-    if (strcmp(range, dynamic_range) != 0) log_line("INFO", "dynamic range %s", range);
+    if (strcmp(range, dynamic_range) != 0) log_verbose("DYNAMIC_RANGE", "dynamic range %s", range);
     snprintf(dynamic_range, sizeof(dynamic_range), "%s", range);
     if (is_hdr != hdr) {
         hdr = is_hdr;
         broadcast();
     }
+}
+
+static gboolean grace_cb(gpointer data)
+{
+    (void)data;
+    grace_timer = 0;
+    if (app_running == 1 && !app_wanted()) {
+        log_verbose("PANEL_TIMEOUT", "app started but its panel never opened");
+        close_app(true);
+    }
+    return G_SOURCE_REMOVE;
+}
+
+//Keep the app while its panel opens, so a close meant for the dot (the crosshair turned
+//off, or a launch reply arriving late) doesn't take the panel with it
+static void expect_panel(void)
+{
+    if (panel_open) return;
+    if (grace_timer) g_source_remove(grace_timer);
+    grace_timer = g_timeout_add(PANEL_GRACE_MS, grace_cb, NULL);
 }
 
 static void on_running(jvalue_ref r)
@@ -529,15 +564,16 @@ static void on_running(jvalue_ref r)
     int running = 0;
     for (ssize_t i = 0; i < jarray_size(list); i++) {
         char id[128];
-        if (get_string(jarray_get(list, i), "id", id, sizeof(id)) && strcmp(id, DOT_APP_ID) == 0) {
+        if (get_string(jarray_get(list, i), "id", id, sizeof(id)) && strcmp(id, APP_ID) == 0) {
             running = 1;
             break;
         }
     }
-    if (running != dot_running) {
-        dot_running = running;
-        if (!running) ensure_dot("dot app not running", false, true);
-        else if (!wanted()) close_dot(true);
+    if (running != app_running) {
+        app_running = running;
+        if (!running) ensure_app("app not running", false, true);
+        //Started by something other than the service (the app list): it's for the panel
+        else if (!app_wanted()) expect_panel();
     }
 }
 
@@ -553,7 +589,7 @@ static bool is_input_app(const char *id)
 }
 
 //Watch the foreground app to hide the dot outside inputs. The list has the main app first,
-//then anything layered over it (quick settings, our own panel and dot). Only the main app
+//then anything layered over it (quick settings, our own app). Only the main app
 //decides, so the picture menus over HDMI keep the crosshair.
 static void on_foreground(jvalue_ref r)
 {
@@ -574,17 +610,18 @@ static void on_foreground(jvalue_ref r)
     if (input == on_input) return;
     on_input = input;
     if (config_bool(&config, "visible") && config_bool(&config, "hideOutsideInputs")) {
-        log_line("INFO", "%s%s", on_input ? "showing on " : "hiding for ", foreground_app);
+        log_verbose("FOREGROUND", "%s%s", on_input ? "showing on " : "hiding for ", foreground_app);
     }
+    if (config_bool(&config, "visible") && config_bool(&config, "hideOutsideInputs")) broadcast();
     char reason[300];
     snprintf(reason, sizeof(reason), "back on %s", foreground_app);
-    update_dot(reason);
+    update_app(reason);
 }
 
 static gboolean wake_cb(gpointer data)
 {
     char *reason = (char *)data;
-    ensure_dot(reason, true, false);
+    ensure_app(reason, true, false);
     g_free(reason);
     return G_SOURCE_REMOVE;
 }
@@ -597,7 +634,7 @@ static void on_power(jvalue_ref r)
     char previous[32];
     snprintf(previous, sizeof(previous), "%s", power_state);
     snprintf(power_state, sizeof(power_state), "%s", state);
-    log_line("INFO", "power state %s -> %s", previous, state);
+    log_verbose("POWER_STATE", "power state %s -> %s", previous, state);
     //Write any pending settings before a power-down can cut them off
     if (!up_state(state)) save_now();
     if (strcmp(state, "Active") != 0) return;
@@ -626,27 +663,52 @@ static watch_t watches[] = {
 //---------------------------------------------------------------------------------------
 //Luna methods.
 
+//Count the panel's subscriptions to see if it's open, and load or close the app to match
+static void update_panel(void)
+{
+    bool open = LSSubscriptionGetHandleSubscribersCount(sh, "panel") > 0;
+    if (open == panel_open) return;
+    panel_open = open;
+    log_verbose("PANEL", "panel %s", open ? "opened" : "closed");
+    if (open && grace_timer) { g_source_remove(grace_timer); grace_timer = 0; }
+    update_app(open ? "panel opened" : "panel closed");
+}
+
 static bool m_get_config(LSHandle *h, LSMessage *msg, void *ctx)
 {
     (void)h; (void)ctx;
     bool subscribed = false;
+    bool panel = false;
     if (LSMessageIsSubscription(msg)) {
+        jvalue_ref r = parse_json(LSMessageGetPayload(msg));
+        panel = get_bool(r, "panel", false);
+        j_release(&r);
         LSError err;
         LSErrorInit(&err);
-        if (LSSubscriptionAdd(sh, "getConfig", msg, &err)) subscribed = true;
+        if (LSSubscriptionAdd(sh, panel ? "panel" : "getConfig", msg, &err)) subscribed = true;
         else LSErrorFree(&err);
     }
     char payload[JSON_MAX + 256];
     config_reply(payload, sizeof(payload), subscribed, true);
     reply(msg, payload);
+    if (panel) update_panel();
     return true;
 }
 
-//The settings panel (or the dot app) closed, so the burst of changes is over
+static gboolean panel_check_cb(gpointer data)
+{
+    (void)data;
+    update_panel();
+    return G_SOURCE_REMOVE;
+}
+
+//A subscriber left. If it was the panel, the burst of changes is over, so save now. The
+//panel count is checked once the hub has dropped the subscription.
 static bool subscription_cancel_cb(LSHandle *h, LSMessage *msg, void *ctx)
 {
     (void)h; (void)msg; (void)ctx;
     if (save_timer) save_now();
+    g_idle_add(panel_check_cb, NULL);
     return true;
 }
 
@@ -679,7 +741,8 @@ static bool m_set_config(LSHandle *h, LSMessage *msg, void *ctx)
 static bool m_reset_config(LSHandle *h, LSMessage *msg, void *ctx)
 {
     (void)h; (void)ctx;
-    static const char *keep[] = { "visible", "autoStart", "tripleOpensSettings", "hideOutsideInputs" };
+    static const char *keep[] = { "visible", "autoStart", "tripleOpensSettings", "hideOutsideInputs",
+                                  "verboseLogging" };
     config_t next;
     config_defaults(&next);
     for (size_t i = 0; i < G_N_ELEMENTS(keep); i++) {
@@ -727,7 +790,7 @@ static bool settings_launch_cb(LSHandle *h, LSMessage *msg, void *ctx)
     if (!get_bool(r, "returnValue", false)) {
         char text[256] = "unknown";
         get_string(r, "errorText", text, sizeof(text));
-        log_line("ERROR", "settings launch failed: %s", text);
+        log_error("LAUNCH_FAILED", "settings launch failed: %s", text);
     }
     j_release(&r);
     return true;
@@ -755,16 +818,17 @@ static bool m_button(LSHandle *h, LSMessage *msg, void *ctx)
         return true;
     }
     press_count++;
-    log_line("INFO", "button press %d", press_count);
+    log_verbose("BUTTON", "button press %d", press_count);
     if (press_timer) { g_source_remove(press_timer); press_timer = 0; }
     if (press_count == 1) {
         set_visible(!config_bool(&config, "visible"));
     } else if (press_count == 3) {
         press_count = 0;
-        log_line("INFO", "triple press: opening settings");
+        log_verbose("BUTTON", "triple press: opening settings");
+        expect_panel();
         set_visible(!config_bool(&config, "visible"));
         call_once("luna://com.webos.applicationManager/launch",
-                  "{\"id\":\"" SETTINGS_APP_ID "\"}", settings_launch_cb, NULL);
+                  "{\"id\":\"" APP_ID "\",\"params\":{\"panel\":true}}", settings_launch_cb, NULL);
         return true;
     }
     press_timer = g_timeout_add(PRESS_GAP_MS, press_timer_cb, NULL);
@@ -781,10 +845,11 @@ static bool m_status(LSHandle *h, LSMessage *msg, void *ctx)
     json_quote(dynamic_range, range, sizeof(range));
     json_quote(power_state, power, sizeof(power));
     snprintf(payload, sizeof(payload),
-             "{\"config\":%s,\"dotLoaded\":%s,\"powerState\":%s,\"hdr\":%s,\"dynamicRange\":%s,"
+             "{\"config\":%s,\"appLoaded\":%s,\"panelOpen\":%s,\"show\":%s,\"powerState\":%s,\"hdr\":%s,\"dynamicRange\":%s,"
              "\"elevated\":%s,\"foregroundApp\":%s,\"onInput\":%s,\"engine\":\"native\","
              "\"returnValue\":true}",
-             c, dot_running == 1 ? "true" : "false", power, hdr ? "true" : "false", range,
+             c, app_running == 1 ? "true" : "false", panel_open ? "true" : "false",
+             dot_wanted() ? "true" : "false", power, hdr ? "true" : "false", range,
              elevated ? "true" : "false", fg, on_input ? "true" : "false");
     reply(msg, payload);
     return true;
@@ -793,7 +858,7 @@ static bool m_status(LSHandle *h, LSMessage *msg, void *ctx)
 static bool m_start(LSHandle *h, LSMessage *msg, void *ctx)
 {
     (void)h; (void)ctx;
-    ensure_dot("start", false, false);
+    ensure_app("start", false, false);
     reply(msg, "{\"started\":true,\"returnValue\":true}");
     return true;
 }
@@ -817,7 +882,7 @@ static LSMethod methods[] = {
 static gboolean on_term(gpointer data)
 {
     (void)data;
-    log_line("INFO", "stopping");
+    log_info("STOPPING", "stopping");
     save_now();
     g_main_loop_quit(loop);
     return G_SOURCE_REMOVE;
@@ -825,7 +890,7 @@ static gboolean on_term(gpointer data)
 
 static bool fail(const char *what, LSError *err)
 {
-    log_line("ERROR", "%s: %s", what, err->message ? err->message : "unknown");
+    log_error("SETUP_FAILED", "%s: %s", what, err->message ? err->message : "unknown");
     LSErrorFree(err);
     return false;
 }
@@ -849,7 +914,8 @@ static int service_main(void)
     g_unix_signal_add(SIGTERM, on_term, NULL);
     g_unix_signal_add(SIGINT, on_term, NULL);
 
-    log_line("INFO", "service started (native)%s", elevated ? "" : " WITHOUT ROOT (not elevated)");
+    log_info("STARTED", "service started");
+    if (!elevated) log_warn("NOT_ROOT", "running without root (not elevated): settings may not be kept");
     if (access(BOOT_MARKER, F_OK) != 0) {
         //Write the marker first, so it exists even when the rule leaves on/off as it was.
         //Worst case (can't write it), the rule runs again on the next start.
@@ -862,7 +928,6 @@ static int service_main(void)
 
     if (!LSUnregister(sh, &err)) LSErrorFree(&err);
     g_main_loop_unref(loop);
-    if (log_fp) fclose(log_fp);
     return 0;
 }
 
@@ -904,14 +969,14 @@ static int supervise(void)
         }
         count = kept;
         if (count >= RESTART_BUDGET) {
-            log_line("ERROR", "service died %d times in %d s, giving up", RESTART_BUDGET, RESTART_WINDOW_S);
+            log_error("GAVE_UP", "service died %d times in %d s, giving up", RESTART_BUDGET, RESTART_WINDOW_S);
             return 1;
         }
         starts[count++] = now;
 
         pid_t pid = fork();
         if (pid < 0) {
-            log_line("ERROR", "can't start the service: %s", strerror(errno));
+            log_error("FORK_FAILED", "can't start the service: %s", strerror(errno));
             return 1;
         }
         if (pid == 0) {
@@ -924,14 +989,13 @@ static int supervise(void)
         int status;
         while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
         child_pid = 0;
-        log_size = -1;      //The service wrote to the log meanwhile, so measure it again
         if (stop_requested) return 0;
         if (WIFEXITED(status)) {
             int code = WEXITSTATUS(status);
             if (code == 0 || code == EXIT_NO_RESTART) return code;
-            log_line("WARN", "service exited with code %d, restarting", code);
+            log_warn("RESTARTING", "service exited with code %d, restarting", code);
         } else if (WIFSIGNALED(status)) {
-            log_line("WARN", "service crashed (signal %d), restarting", WTERMSIG(status));
+            log_warn("RESTARTING", "service crashed (signal %d), restarting", WTERMSIG(status));
         }
         //Let the hub notice the old connection is gone before the new one registers
         sleep(RESTART_DELAY_S);

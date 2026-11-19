@@ -6,14 +6,16 @@ echo "== crosshair service"
 luna-send -n 1 luna://org.abbie.crosshair.service/status '{}' | node -e '
 let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
   try { const r=JSON.parse(s); const c=r.config||{};
-    console.log("  on:", c.visible, " auto-start:", c.autoStart, " dot app loaded:", r.dotLoaded);
+    console.log("  on:", c.visible, " auto-start:", c.autoStart, " app loaded:", r.appLoaded, " panel open:", r.panelOpen);
     console.log("  power:", r.powerState, " HDR:", r.hdr, "(" + r.dynamicRange + ")");
     console.log("  shape:", c.shape, " color:", c.color, " size:", c.size);
     console.log("  root:", r.elevated, " in front:", r.foregroundApp, " on input:", r.onInput);
   } catch (e) { console.log("  no reply: " + s.trim()); } });'
 
-echo "== power history (service log)"
-grep -E "power state|auto-start|service started|crosshair (on|off)|ERROR|WARN" /tmp/org.abbie.crosshair.log 2>/dev/null | tail -12 | sed 's/^/  /'
+#The service logs to syslog, which the TV keeps in /var/log/legacy-log. Power states, presses,
+#and on/off only show up with Verbose logging on; start, stop, warnings, and errors always do.
+echo "== service log (legacy-log)"
+grep -h -F "org.abbie.crosshair[" /var/log/legacy-log 2>/dev/null | tail -12 | sed 's/^/  /'
 
 echo "== Input Hook"
 for n in lginput2 micomservice; do

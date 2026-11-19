@@ -1,4 +1,5 @@
-/* The page is transparent so the game and the live crosshair show around the panel. */
+/* The page must stay transparent: webOS draws the input underneath this window, and the
+   game and the crosshair show around the panel. */
 html, body {
     margin: 0;
     width: 100%;
@@ -9,10 +10,14 @@ html, body {
     color: #f2f2f2;
 }
 
-#preview {
+#crosshair, #preview {
     position: absolute;
     left: 0;
     top: 0;
+}
+
+#panel[hidden] {
+    display: none;
 }
 
 /* On/off switch. */

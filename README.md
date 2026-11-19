@@ -34,7 +34,7 @@ Made for console and PC games that don't have a crosshair of their own (or only 
 
 ## Initial Setup
 
-1. Install both packages: `org.abbie.crosshair_<version>_all.ipk` (settings and service) and `org.abbie.crosshair.dot_<version>_all.ipk` (the crosshair itself).
+1. Install `org.abbie.crosshair_<version>_all.ipk`. If you're upgrading from a version before 0.6.0, also remove the old `org.abbie.crosshair.dot` app (for example in webOS Dev Manager); the crosshair is now part of the main app.
 2. Elevate the service to root. This is needed once after every install:
 
    ```sh
@@ -64,7 +64,7 @@ Notes:
 
 - The command above handles everything: one press turns the crosshair on or off, and three quick presses open the settings **(if enabled)**. If you'd rather have separate buttons, replace `button` in the command with `show`, `hide`, or `toggle`.
 - **Pick a button that isn't bound to anything else** in Input Hook.
-- Presses count as one gesture while each comes within 600 ms of the one before. The first press toggles right away; a second is held back and undone when the gesture ends (so two presses leave things as they were); a third undoes the first and opens the settings panel. Each press is logged in `/tmp/org.abbie.crosshair.log` as `button press <n>`.
+- Presses count as one gesture while each comes within 600 ms of the one before. The first press toggles right away; a second is held back and undone when the gesture ends (so two presses leave things as they were); a third undoes the first and opens the settings panel. With **Verbose logging** on, each press is logged as `BUTTON button press <n>` (see [Logs](#logs)).
 
 ## Options
 
@@ -116,34 +116,40 @@ Up/Down picks a row, Left/Right changes it (hold to speed up on long ranges), OK
 
 **Center it** puts it back in the middle.
 
-**Reset to defaults** resets the look and position, but keeps the on/off, auto-start, triple press, and hide settings how you had them.
+### Logging
+
+**Verbose logging** makes the service log everything it does: button presses, turning on and off, launching and closing the app, the panel, power states, and HDR changes. Without it, only startup, shutdown, warnings, and errors are logged. Turn it on when you're tracking down a problem. See [Logs](#logs) for where to find them. **Off by default.**
+
+**Reset to defaults** resets the look and position, but keeps the on/off, auto-start, triple press, hide, and logging settings how you had them.
 
 ## Technical Stuff and Limitations
 
 ### How it works
 
-The crosshair is three parts in two packages:
+The crosshair is two parts in one package, `org.abbie.crosshair`:
 
-| Part | Package | Role |
-|---|---|---|
-| Service (`org.abbie.crosshair.service`) | `org.abbie.crosshair` | Native (C) root service. Stores settings, applies the power-on rule, and starts or closes the dot app. |
-| Settings (`org.abbie.crosshair`) | `org.abbie.crosshair` | Overlay web app with the on-TV panel. Takes remote focus while open. |
-| Dot (`org.abbie.crosshair.dot`) | `org.abbie.crosshair.dot` | Transparent `floating` web app that draws the crosshair as SVG. Hidden from the app list. |
+| Part | Role |
+|---|---|
+| Service (`org.abbie.crosshair.service`) | Native (C) root service. Stores settings, applies the power-on rule, and starts or closes the app. |
+| App (`org.abbie.crosshair`) | Transparent `floating` web app that draws the crosshair as SVG and holds the on-TV settings panel. |
 
-- The dot is a `floating` window: a compositor layer above the full-screen input and below the TV's own menus. Unlike overlay windows, it isn't closed by the compositor's 2-minute idle timer and doesn't take remote focus.
-- Off closes the dot app entirely, since a loaded floating window interferes with Home and Back. Turning it on relaunches it in about half a second (the first launch after an install takes several seconds).
+- The app is a `floating` window: a compositor layer above full-screen windows (inputs, apps, and, on webOS 10, the Home screen) and below the TV's overlay menus, popups, and notifications. Unlike overlay windows, it isn't closed by the compositor's 2-minute idle timer.
+- The window takes remote focus only while the settings panel is open: the page sets the `needFocus` window property when the panel opens and clears it when it closes, and the compositor follows the property live. With the panel closed, the remote goes to whatever is underneath.
+- The service launches the app with `{"dot": true}` to show the crosshair. Any other launch (the app list or the triple press) opens the panel. While open, the panel holds a `getConfig` subscription with `panel: true`, which keeps the app loaded even with the crosshair off.
+- When neither the crosshair nor the panel is up, the app is closed entirely, since a loaded floating window interferes with Home and Back. Turning the crosshair on relaunches it in about half a second (the first launch after an install takes several seconds).
 - The service is event driven, with no polling loops. It subscribes to the power state, the running-app list, the foreground app, and the picture settings, and does nothing between events.
 - **Storage writes.** Turning the crosshair on or off never writes to the TV's storage: on/off lives in RAM (`/tmp`), and the power-on rule sets it after every boot. Other settings are saved to `config.json` once changes stop for 10 seconds, when the settings panel closes, or when the TV powers down, and only if something actually changed.
 - **Power-on rule.** After a boot or a wake from standby, `visible` is set to `autoStart`. A restart of the service alone (reinstall, crash) keeps the current state; `/tmp/org.abbie.crosshair.booted` marks that the boot already happened and holds the on/off state.
 - **HDR detection.** The `dynamicRange` dimension of the picture settings (for example `hdrALLM`) selects `hdrBrightness` over `brightness`.
 - **Hide on Home and apps.** The first non-crosshair entry in `getForegroundAppInfo` is the main app. Only `com.webos.app.hdmi*`, `livetv`, and `externalinput.*` count as inputs.
-- The dot app is relaunched automatically if it dies on its own, up to 5 times a minute.
+- The app is relaunched automatically if it dies on its own, up to 5 times a minute.
+- **Logs.** The service logs through syslog, tagged `org.abbie.crosshair`; see [Logs](#logs). PmLog, the webOS logger, would be the usual choice, but the TV drops PmLog lines from homebrew unless its developer log recording is switched on.
 - **Crash recovery.** The process the hub starts is a small supervisor that runs the service in a child process. If the service crashes or is killed, the supervisor starts it again a second later, up to 5 times a minute; a normal stop isn't restarted. The supervisor takes about 0.15 MB.
 
 ### Measurements (C2, webOS 10.3.1)
 
 - Game Optimizer, ALLM, VRR, HDR, and the refresh rate are unchanged with the crosshair up (checked at 4K 120 Hz HDR10 with `scripts/tv/gamecheck.sh`).
-- About 30 MB for the dot app while on, and under 3 MB for the service (about 0.4 MB of it its own, the rest shared system libraries). No CPU use while idle.
+- About 30 MB for the app while on, and under 3 MB for the service (about 0.4 MB of it its own, the rest shared system libraries). No CPU use while idle.
 - Input lag has not been measured, though none was noticeable in testing.
 
 ### Limitations
@@ -160,12 +166,12 @@ All methods are at `luna://org.abbie.crosshair.service/<method>`.
 
 | Method | Parameters | Description |
 |---|---|---|
-| `getConfig` | `subscribe` (optional) | Current settings, whether the picture is HDR, and whether the service is root. With `subscribe`, a reply after every change. |
+| `getConfig` | `subscribe`, `panel` (both optional) | Current settings, whether the crosshair should be on screen now (`show`), whether the picture is HDR, and whether the service is root. With `subscribe`, a reply after every change. The settings panel adds `panel: true`, which keeps the app loaded until it cancels. |
 | `setConfig` | `config` | Applies a partial settings object. Invalid fields are skipped and keep their current value. |
-| `resetConfig` | | Restores the default look and position, keeping on/off, auto-start, triple press, and hide. |
+| `resetConfig` | | Restores the default look and position, keeping on/off, auto-start, triple press, hide, and logging. |
 | `show`, `hide`, `toggle` | | Turns the crosshair on or off. |
 | `button` | | Remote button handler for Input Hook (one press toggles, three open the settings if enabled). |
-| `status` | | Settings, whether the dot app is loaded, power state, dynamic range, foreground app, and whether an input is in front. |
+| `status` | | Settings, whether the app is loaded, whether the panel is open, whether the crosshair is on screen, power state, dynamic range, foreground app, and whether an input is in front. |
 | `start` | | No-op; the boot hook calls it to start the service. |
 
 ### Files on the TV
@@ -174,8 +180,18 @@ All methods are at `luna://org.abbie.crosshair.service/<method>`.
 |---|---|
 | `/home/root/.config/org.abbie.crosshair/config.json` | Saved settings (everything but on/off) |
 | `/tmp/org.abbie.crosshair.booted` | Boot marker and the current on/off (cleared every boot) |
-| `/tmp/org.abbie.crosshair.log` | Service log, up to 64 KB plus one older file (cleared every boot) |
+| `/var/log/legacy-log` | The TV's syslog file, which holds the service's log lines (in RAM, cleared every boot, size managed by the TV) |
 | `/var/lib/webosbrew/init.d/95-abbie-crosshair` | Boot hook |
+
+### Logs
+
+The service writes to the TV's system log, which keeps it in `/var/log/legacy-log`. That file is in RAM, so logging never writes to the TV's storage, and the TV caps its size and clears it at every boot. Each line is tagged `org.abbie.crosshair[<pid>]` and starts with an ID such as `STARTED`, `LAUNCH_FAILED`, or `BUTTON`. To read them over SSH:
+
+```sh
+grep -F 'org.abbie.crosshair[' /var/log/legacy-log
+```
+
+Startup, shutdown, warnings, and errors are always there. Everything else needs **Verbose logging** on.
 
 ## Building
 
@@ -186,7 +202,7 @@ python scripts/build.py
 python scripts/deploy.py <ssh-host>
 ```
 
-`build.py` stages each part with its shared files, generates the icons, and writes both IPKs to `build/`. `deploy.py` copies them to the TV, installs them (checking the installed version and retrying once), elevates the service, installs the boot hook, and restarts the service. `<ssh-host>` is anything `ssh` accepts, such as `root@<tv-ip>` or a Host alias from your SSH config.
+`build.py` stages the app with its shared files, generates the icons, builds the service, and writes the IPK to `build/`. `deploy.py` copies it to the TV, removes the separate dot app that versions before 0.6.0 installed, installs the IPK (checking the installed version and retrying once), elevates the service, installs the boot hook, and restarts the service. `<ssh-host>` is anything `ssh` accepts, such as `root@<tv-ip>` or a Host alias from your SSH config.
 
 ### The service
 
@@ -202,7 +218,7 @@ The service is C, in `crosshair/native/`. It needs CMake and the [buildroot-nc4]
 Serve the repository with `python -m http.server` and open:
 
 - `dev/gallery.html`: every shape, drawn by the shipping `render.js` at 4x zoom, plain and outlined.
-- `dev/settings.html`: the real settings panel in a desktop browser, with the service emulated by `dev/mock-bridge.js`. Arrow keys, Enter, and Escape act as the remote. Add `?hdr=1` to pretend the TV is showing HDR, and `?root=0` to pretend the service isn't elevated.
+- `dev/settings.html`: the real app in a desktop browser, with the service emulated by `dev/mock-bridge.js`. Arrow keys, Enter, and Escape act as the remote; reload to reopen the panel after closing it. Add `?hdr=1` to pretend the TV is showing HDR, and `?root=0` to pretend the service isn't elevated.
 
 ### TV scripts
 
@@ -215,10 +231,9 @@ Run on the TV over SSH (`ssh -tt`, so `luna-send` prints its replies):
 
 | Path | Contents |
 |---|---|
-| `crosshair/dot/` | The floating dot app |
-| `crosshair/settings/` | The settings panel app |
+| `crosshair/app/` | The floating app: the crosshair and the settings panel |
 | `crosshair/native/` | The root service (C) |
-| `crosshair/shared/` | `config.js` (settings schema and validation), `render.js` (drawing), and `luna.js` (bus client), copied into each package |
+| `crosshair/shared/` | `config.js` (settings schema and validation), `render.js` (drawing), and `luna.js` (bus client), copied into the app |
 | `crosshair/boot/` | Homebrew Channel boot hook |
 | `scripts/` | `build.py`, `deploy.py`, `icons.py` (launcher icons), and the service build scripts |
 | `scripts/tv/` | Scripts to run on the TV |

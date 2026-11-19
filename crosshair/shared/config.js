@@ -83,6 +83,8 @@
     //brighter while it shows HDR. `tripleOpensSettings` makes three quick presses of the
     //remote button open the settings panel (one press still turns the crosshair on or off).
     //`hideOutsideInputs` hides it while Home or an app is in front instead of an input.
+    //`verboseLogging` makes the service log everything it does to the system log, not just
+    //start, stop, warnings, and errors.
     var DEFAULTS = {
         visible: false,
         autoStart: false,
@@ -100,10 +102,12 @@
         outlineColor: '#000000',
         outlineWidth: 1,
         offsetX: 0,
-        offsetY: 0
+        offsetY: 0,
+        verboseLogging: false
     };
 
-    var BOOLS = ['visible', 'autoStart', 'tripleOpensSettings', 'hideOutsideInputs', 'outline'];
+    var BOOLS = ['visible', 'autoStart', 'tripleOpensSettings', 'hideOutsideInputs', 'outline',
+        'verboseLogging'];
 
     //Clamp a number to its range. Anything that isn't a number (or a numeric string) kicks
     //back `fallback`, the current value.

@@ -6,10 +6,14 @@
 <link rel="stylesheet" href="settings.css">
 </head>
 <body>
+<!-- Web apps render at 1920x1080 and the TV scales them to the panel. -->
+<!-- The crosshair itself, drawn while it's on. -->
+<svg id="crosshair" width="1920" height="1080" viewBox="0 0 1920 1080"
+     xmlns="http://www.w3.org/2000/svg"></svg>
 <!-- Preview of the crosshair while it's off, drawn exactly where the real one goes. -->
 <svg id="preview" width="1920" height="1080" viewBox="0 0 1920 1080"
      xmlns="http://www.w3.org/2000/svg"></svg>
-<div id="panel">
+<div id="panel" hidden>
     <div id="title">Crosshair</div>
     <div id="warning" hidden></div>
     <div id="rows"></div>
@@ -20,5 +24,6 @@
 <script src="config.js"></script>
 <script src="render.js"></script>
 <script src="settings.js"></script>
+<script src="crosshair.js"></script>
 </body>
 </html>

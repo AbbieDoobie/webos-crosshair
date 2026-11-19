@@ -1,6 +1,6 @@
 /*
  * Development stand-in for webOS's PalmServiceBridge, emulating the crosshair service in
- * memory so the settings panel runs in a desktop browser. Add ?hdr=1 to the page URL to
+ * memory so the app runs in a desktop browser. Add ?hdr=1 to the page URL to
  * pretend the TV is showing HDR, and ?root=0 to pretend the service isn't elevated.
  */
 (function () {
@@ -15,8 +15,15 @@
         setTimeout(function () { bridge.onservicecallback(JSON.stringify(payload)); }, 10);
     }
 
+    //The real service also hides the crosshair outside inputs; here an input is always in front
+    function state(extra) {
+        var r = { config: config, show: config.visible, hdr: hdr, elevated: elevated };
+        for (var k in extra) r[k] = extra[k];
+        return r;
+    }
+
     function broadcast() {
-        subscribers.forEach(function (b) { reply(b, { config: config, hdr: hdr, elevated: elevated, subscribed: true }); });
+        subscribers.forEach(function (b) { reply(b, state({ subscribed: true })); });
     }
 
     window.PalmServiceBridge = function () {};
@@ -25,7 +32,7 @@
         var method = uri.split('/').pop();
         if (method === 'getConfig') {
             if (args.subscribe) subscribers.push(this);
-            reply(this, { config: config, hdr: hdr, elevated: elevated, subscribed: !!args.subscribe, returnValue: true });
+            reply(this, state({ subscribed: !!args.subscribe, returnValue: true }));
         } else if (method === 'setConfig') {
             config = CrosshairConfig.merge(config, args.config);
             reply(this, { config: config, returnValue: true });
@@ -34,7 +41,8 @@
             config = CrosshairConfig.merge(CrosshairConfig.DEFAULTS,
                 { visible: config.visible, autoStart: config.autoStart,
                   tripleOpensSettings: config.tripleOpensSettings,
-                  hideOutsideInputs: config.hideOutsideInputs });
+                  hideOutsideInputs: config.hideOutsideInputs,
+                  verboseLogging: config.verboseLogging });
             reply(this, { config: config, returnValue: true });
             broadcast();
         } else {

@@ -1,7 +1,6 @@
-"""Build the crosshair's two IPKs into build/.
+"""Build the crosshair's IPK into build/.
 
-  org.abbie.crosshair_<v>_all.ipk      settings app + root service
-  org.abbie.crosshair.dot_<v>_all.ipk  the floating dot
+  org.abbie.crosshair_<v>_all.ipk  the app (crosshair and settings panel) + root service
 
 Usage: python scripts/build.py
 Needs `ares-package` (npm @webos-tools/cli, Node.js 20+) on PATH, and the buildroot-nc4
@@ -25,17 +24,14 @@ STAGE = BUILD / "stage"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import icons  # noqa: E402
 
-#Which shared files each web app needs. The service is built separately (build_native).
-COMPONENTS = {
-    "settings": ["luna.js", "config.js", "render.js"],
-    "dot": ["luna.js", "config.js", "render.js"],
-}
+#Shared files the web app needs. The service is built separately (build_native).
+SHARED = ["luna.js", "config.js", "render.js"]
 
 
-def stage(name: str) -> Path:
-    out = STAGE / name
-    shutil.copytree(SRC / name, out)
-    for f in COMPONENTS[name]:
+def stage_app() -> Path:
+    out = STAGE / "app"
+    shutil.copytree(SRC / "app", out)
+    for f in SHARED:
         shutil.copy2(SRC / "shared" / f, out / f)
     icons.write(out)
     return out
@@ -111,10 +107,7 @@ def main() -> None:
         ipk.unlink()
     STAGE.mkdir(parents=True)
 
-    staged = {name: stage(name) for name in COMPONENTS}
-    staged["service"] = build_native()
-    package(staged["settings"], staged["service"])
-    package(staged["dot"])
+    package(stage_app(), build_native())
     ipk = next(BUILD.glob("org.abbie.crosshair_*_all.ipk"))
     make_executable(ipk, "usr/palm/services/org.abbie.crosshair.service/crosshair-service")
     shutil.rmtree(STAGE)

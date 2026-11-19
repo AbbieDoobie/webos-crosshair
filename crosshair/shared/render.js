@@ -1,8 +1,8 @@
 /*
  * Draws a crosshair into an <svg> sized 1920x1080 (the web-app coordinate space).
  *
- * Shared by the dot app (the real crosshair) and the settings panel (its preview while
- * the crosshair is off), so both put identical pixels in the identical place.
+ * Draws both the real crosshair and the settings panel's preview of it (while the crosshair
+ * isn't showing), so both put identical pixels in the identical place.
  *
  *   CrosshairRender.draw(svg, config, { hdr: bool })   redraws only if something changed
  *   CrosshairRender.clear(svg)

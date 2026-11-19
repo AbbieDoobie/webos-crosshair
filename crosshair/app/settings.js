@@ -1,10 +1,14 @@
 /*
- * On-TV settings panel.
+ * On-TV settings panel, in the same floating window as the crosshair.
  *
- * Every change goes straight to the service. While the crosshair is on, the real one
- * (the dot app) shows each change. While it's off, this panel draws a preview of it
- * whenever a look setting is selected, with the same drawing code, in its own full-screen
- * transparent window. Nothing else launches, so the panel keeps the remote.
+ * The window takes the remote only while the panel is open (the needFocus window
+ * property); with the panel closed, the remote goes to whatever is underneath. While open,
+ * the panel holds a getConfig subscription with panel: true, which tells the service to
+ * keep the app loaded even with the crosshair off.
+ *
+ * Every change goes straight to the service. While the crosshair shows, it shows each
+ * change. While it doesn't, this panel draws a preview of it whenever a look setting is
+ * selected, with the same drawing code.
  *
  * Remote: Up/Down choose a row, Left/Right change it (hold to speed up), OK toggles or
  * runs it, Back closes. The Magic Remote pointer works too: click a row's arrows, a
@@ -21,8 +25,13 @@
     var REPEAT_MS = 300;        //Presses closer than this count as holding the key
     var RETRY_MS = 2000;        //Wait before subscribing again after the service drops
 
+    var isOpen = false;
+    var subscription = null;    //The panel's getConfig subscription while open
+    var current = null;         //Token of the live subscription; replies to others are dropped
+    var retryTimer = 0;
     var config = null;
     var hdr = false;            //The TV is showing HDR, so HDR brightness is in use
+    var dotShown = false;       //The crosshair is on screen (the service's show flag)
     var selectedKey = 'visible';
     var requestSeq = 0;         //Sequence number of the newest setConfig sent
     var inFlight = 0;           //Number of setConfig calls not yet answered
@@ -75,6 +84,8 @@
         { key: 'offsetX', label: 'Move left / right', type: 'number' },
         { key: 'offsetY', label: 'Move up / down', type: 'number' },
         { key: 'center', label: 'Center it', type: 'action' },
+        { divider: true },
+        { key: 'verboseLogging', label: 'Verbose logging', type: 'bool' },
         { divider: true },
         { key: 'reset', label: 'Reset to defaults', type: 'action' },
         { key: 'close', label: 'Close', type: 'action' }
@@ -175,8 +186,38 @@
         });
     }
 
+    //Take the remote, or hand it back to whatever is underneath
+    function setFocus(on) {
+        var value = on ? 'true' : 'false';
+        try {
+            webOSSystem.window.setProperty('needFocus', value);
+        } catch (e) {
+            try { PalmSystem.setWindowProperty('needFocus', value); } catch (e2) { /* Not on a TV */ }
+        }
+    }
+
+    function open() {
+        if (isOpen) return;
+        isOpen = true;
+        selectedKey = 'visible';
+        document.getElementById('panel').hidden = false;
+        setFocus(true);
+        if (config) render();
+        subscribe();
+    }
+
+    //Hide the panel and hand back the remote. With the crosshair off there's nothing left
+    //to show, so the app closes (the service would close it too once the subscription ends).
     function close() {
-        window.close();
+        if (!isOpen) return;
+        isOpen = false;
+        if (retryTimer) { clearTimeout(retryTimer); retryTimer = 0; }
+        current = null;
+        if (subscription) { subscription.cancel(); subscription = null; }
+        document.getElementById('panel').hidden = true;
+        CrosshairRender.clear(previewEl);
+        setFocus(false);
+        if (!dotShown) window.close();
     }
 
     //-----------------------------------------------------------------------------------
@@ -234,15 +275,15 @@
         return a;
     }
 
-    //Draw a preview here whenever a look setting is selected while the crosshair is off
+    //Draw a preview whenever a look setting is selected while the crosshair isn't showing
     function renderPreview() {
-        var show = !config.visible && C.LOOK_KEYS.indexOf(selectedKey) >= 0;
+        var show = !dotShown && C.LOOK_KEYS.indexOf(selectedKey) >= 0;
         if (show) CrosshairRender.draw(previewEl, config, { hdr: hdr });
         else CrosshairRender.clear(previewEl);
     }
 
     function render() {
-        if (!config) return;
+        if (!config || !isOpen) return;
         renderRows();
         renderPreview();
     }
@@ -352,6 +393,7 @@
     }
 
     document.addEventListener('keydown', function (e) {
+        if (!isOpen) return;
         var now = Date.now();
         repeats = (e.keyCode === lastKey && now - lastKeyTime < REPEAT_MS) ? repeats + 1 : 0;
         lastKey = e.keyCode;
@@ -382,18 +424,27 @@
 
     //-----------------------------------------------------------------------------------
 
-    //Follow the service's settings. If it drops (reinstall, crash), drop the dead
-    //subscription and keep trying, so the panel picks the service back up by itself.
+    //Follow the service's settings while open. If it drops (reinstall, crash), drop the
+    //dead subscription and keep trying, so the panel picks the service back up by itself.
     function subscribe() {
-        var handle = Luna.subscribe(SERVICE + 'getConfig', {}, function (reply) {
+        retryTimer = 0;
+        var token = {};
+        current = token;
+        var handle = Luna.subscribe(SERVICE + 'getConfig', { panel: true }, function (reply) {
+            if (token !== current) return;      //Closed, or replaced by a retry
             if (reply.returnValue === false || reply.subscribed === false) {
                 showMessage('Crosshair service not responding. Is it installed and elevated?');
                 if (handle) handle.cancel();
-                setTimeout(subscribe, RETRY_MS);
+                subscription = current = null;
+                retryTimer = setTimeout(subscribe, RETRY_MS);
                 return;
             }
             showMessage('');
             showElevationWarning(reply.elevated === false);
+            if (typeof reply.show === 'boolean' && reply.show !== dotShown) {
+                dotShown = reply.show;
+                if (config) renderPreview();
+            }
             if (typeof reply.hdr === 'boolean' && reply.hdr !== hdr) {
                 hdr = reply.hdr;
                 if (config) render();
@@ -402,7 +453,8 @@
             //would make a held arrow key flicker backwards.
             if (inFlight === 0) takeConfig(reply.config);
         });
+        if (token === current) subscription = handle;
     }
 
-    subscribe();
+    window.CrosshairPanel = { open: open, close: close };
 }());
