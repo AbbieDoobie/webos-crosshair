@@ -3,14 +3,11 @@
   org.abbie.crosshair_<v>_all.ipk      settings app + root service
   org.abbie.crosshair.dot_<v>_all.ipk  the floating dot
 
-Usage: python scripts/build.py [--js]
-Needs `ares-package` (npm @webos-tools/cli, Node.js 20+) on PATH.
-
-The service is the native C one (crosshair/native) by default. It needs the buildroot-nc4
-webOS toolchain: on Windows in WSL (distro from CROSSHAIR_WSL_DISTRO, default
-Ubuntu-24.04), elsewhere on this machine. See scripts/build-native.sh.
-
---js ships the older JS service (crosshair/service) instead, which needs no toolchain.
+Usage: python scripts/build.py
+Needs `ares-package` (npm @webos-tools/cli, Node.js 20+) on PATH, and the buildroot-nc4
+webOS toolchain for the native service (crosshair/native): on Windows in WSL (distro from
+CROSSHAIR_WSL_DISTRO, default Ubuntu-24.04), elsewhere on this machine. See
+scripts/build-native.sh.
 """
 import io
 import os
@@ -28,10 +25,9 @@ STAGE = BUILD / "stage"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import icons  # noqa: E402
 
-#Which shared files each component needs.
+#Which shared files each web app needs. The service is built separately (build_native).
 COMPONENTS = {
     "settings": ["luna.js", "config.js", "render.js"],
-    "service": ["config.js"],
     "dot": ["luna.js", "config.js", "render.js"],
 }
 
@@ -41,8 +37,7 @@ def stage(name: str) -> Path:
     shutil.copytree(SRC / name, out)
     for f in COMPONENTS[name]:
         shutil.copy2(SRC / "shared" / f, out / f)
-    if name != "service":
-        icons.write(out)
+    icons.write(out)
     return out
 
 
@@ -110,21 +105,18 @@ def package(*dirs: Path) -> None:
 
 
 def main() -> None:
-    native = "--js" not in sys.argv[1:]
     if STAGE.exists():
         shutil.rmtree(STAGE)
     for ipk in BUILD.glob("*.ipk"):
         ipk.unlink()
     STAGE.mkdir(parents=True)
 
-    staged = {name: stage(name) for name in COMPONENTS if not (native and name == "service")}
-    if native:
-        staged["service"] = build_native()
+    staged = {name: stage(name) for name in COMPONENTS}
+    staged["service"] = build_native()
     package(staged["settings"], staged["service"])
     package(staged["dot"])
-    if native:
-        ipk = next(BUILD.glob("org.abbie.crosshair_*_all.ipk"))
-        make_executable(ipk, "usr/palm/services/org.abbie.crosshair.service/crosshair-service")
+    ipk = next(BUILD.glob("org.abbie.crosshair_*_all.ipk"))
+    make_executable(ipk, "usr/palm/services/org.abbie.crosshair.service/crosshair-service")
     shutil.rmtree(STAGE)
 
     for ipk in sorted(BUILD.glob("*.ipk")):

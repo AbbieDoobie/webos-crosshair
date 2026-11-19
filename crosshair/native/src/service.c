@@ -1,7 +1,7 @@
 /*
- * org.abbie.crosshair.service, native: owns the crosshair settings and keeps the dot on
- * screen. A C port of crosshair/service/service.js with the same methods, replies, files,
- * and rules, so the settings panel and the dot app can't tell them apart.
+ * org.abbie.crosshair.service: owns the crosshair settings and keeps the dot on screen.
+ * It replaced the JS service in 0.5.0 (git tag js-service-final has the last JS version)
+ * with the same methods, replies, files, and rules.
  *
  * Runs as root (Homebrew Channel's elevate-service). Event driven: a glib main loop with
  * four subscriptions (power state, the running-app list, the foreground app, and the

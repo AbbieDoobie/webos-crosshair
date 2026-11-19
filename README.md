@@ -126,7 +126,7 @@ The crosshair is three parts in two packages:
 
 | Part | Package | Role |
 |---|---|---|
-| Service (`org.abbie.crosshair.service`) | `org.abbie.crosshair` | Root service, in JS or native C (same methods and files). Stores settings, applies the power-on rule, and starts or closes the dot app. |
+| Service (`org.abbie.crosshair.service`) | `org.abbie.crosshair` | Native (C) root service. Stores settings, applies the power-on rule, and starts or closes the dot app. |
 | Settings (`org.abbie.crosshair`) | `org.abbie.crosshair` | Overlay web app with the on-TV panel. Takes remote focus while open. |
 | Dot (`org.abbie.crosshair.dot`) | `org.abbie.crosshair.dot` | Transparent `floating` web app that draws the crosshair as SVG. Hidden from the app list. |
 
@@ -138,12 +138,12 @@ The crosshair is three parts in two packages:
 - **HDR detection.** The `dynamicRange` dimension of the picture settings (for example `hdrALLM`) selects `hdrBrightness` over `brightness`.
 - **Hide on Home and apps.** The first non-crosshair entry in `getForegroundAppInfo` is the main app. Only `com.webos.app.hdmi*`, `livetv`, and `externalinput.*` count as inputs.
 - The dot app is relaunched automatically if it dies on its own, up to 5 times a minute.
-- **Crash recovery (native service).** The process the hub starts is a small supervisor that runs the service in a child process. If the service crashes or is killed, the supervisor starts it again a second later, up to 5 times a minute; a normal stop isn't restarted. The supervisor takes about 0.15 MB.
+- **Crash recovery.** The process the hub starts is a small supervisor that runs the service in a child process. If the service crashes or is killed, the supervisor starts it again a second later, up to 5 times a minute; a normal stop isn't restarted. The supervisor takes about 0.15 MB.
 
 ### Measurements (C2, webOS 10.3.1)
 
 - Game Optimizer, ALLM, VRR, HDR, and the refresh rate are unchanged with the crosshair up (checked at 4K 120 Hz HDR10 with `scripts/tv/gamecheck.sh`).
-- About 30 MB for the dot app while on. The JS service takes about 21 MB (6.9 MB of it its own, the rest shared Node code); the native service takes 2 MB (0.5 MB its own). No CPU use while idle.
+- About 30 MB for the dot app while on, and under 3 MB for the service (about 0.4 MB of it its own, the rest shared system libraries). No CPU use while idle.
 - Input lag has not been measured, though none was noticeable in testing.
 
 ### Limitations
@@ -179,7 +179,7 @@ All methods are at `luna://org.abbie.crosshair.service/<method>`.
 
 ## Building
 
-Requirements: Python 3, Node.js 20 or newer, LG's CLI (`npm install -g @webos-tools/cli`) with `ares-package` on `PATH`, and the webOS toolchain for the native service (see below).
+Requirements: Python 3, Node.js 20 or newer, LG's CLI (`npm install -g @webos-tools/cli`) with `ares-package` on `PATH`, and the webOS toolchain for the service (see below).
 
 ```sh
 python scripts/build.py
@@ -188,14 +188,14 @@ python scripts/deploy.py <ssh-host>
 
 `build.py` stages each part with its shared files, generates the icons, and writes both IPKs to `build/`. `deploy.py` copies them to the TV, installs them (checking the installed version and retrying once), elevates the service, installs the boot hook, and restarts the service. `<ssh-host>` is anything `ssh` accepts, such as `root@<tv-ip>` or a Host alias from your SSH config.
 
-### Native service
+### The service
 
-The service is built from the C source in `crosshair/native/` by default. It needs CMake and the [buildroot-nc4](https://github.com/openlgtv/buildroot-nc4) webOS toolchain (built and tested with release `webos-a38c582`), extracted with `relocate-sdk.sh` run. The toolchain runs on Linux; on Windows, `build.py` runs `scripts/build-native.sh` in WSL (distro `Ubuntu-24.04`, or set `CROSSHAIR_WSL_DISTRO`). Set `TOOLCHAIN` if the SDK isn't in `~/arm-webos-linux-gnueabi_sdk-buildroot`.
+The service is C, in `crosshair/native/`. It needs CMake and the [buildroot-nc4](https://github.com/openlgtv/buildroot-nc4) webOS toolchain (built and tested with release `webos-a38c582`), extracted with `relocate-sdk.sh` run. The toolchain runs on Linux; on Windows, `build.py` runs `scripts/build-native.sh` in WSL (distro `Ubuntu-24.04`, or set `CROSSHAIR_WSL_DISTRO`). Set `TOOLCHAIN` if the SDK isn't in `~/arm-webos-linux-gnueabi_sdk-buildroot`.
 
 - `scripts/gen_schema.py` writes the C settings table from `config.js`, so defaults, limits, and shapes stay in one place.
 - `scripts/native_parity.py <ssh-host>` runs a few thousand random settings patches through `config.js` and through the C code on the TV, and checks that they match.
 - `ares-package` takes file modes from the disk, and Windows has none, so `build.py` marks the service binary executable inside the IPK.
-- `python scripts/build.py --js` ships the older JS service in `crosshair/service/` instead. It does the same job, needs no toolchain, and takes about 7 MB of RAM instead of 0.4 MB.
+- Before 0.5.0 the service was JavaScript on the TV's Node.js, which needed no toolchain but took about 7 MB of RAM instead of 0.4 MB. The git tag `js-service-final` has the last version with it.
 
 ### Development previews
 
@@ -217,11 +217,10 @@ Run on the TV over SSH (`ssh -tt`, so `luna-send` prints its replies):
 |---|---|
 | `crosshair/dot/` | The floating dot app |
 | `crosshair/settings/` | The settings panel app |
-| `crosshair/native/` | The root service, in C (the default) |
-| `crosshair/service/` | The same service in JS (`--js`) |
+| `crosshair/native/` | The root service (C) |
 | `crosshair/shared/` | `config.js` (settings schema and validation), `render.js` (drawing), and `luna.js` (bus client), copied into each package |
 | `crosshair/boot/` | Homebrew Channel boot hook |
-| `scripts/` | `build.py`, `deploy.py`, `icons.py` (launcher icons), and the native build scripts |
+| `scripts/` | `build.py`, `deploy.py`, `icons.py` (launcher icons), and the service build scripts |
 | `scripts/tv/` | Scripts to run on the TV |
 | `dev/` | Desktop previews |
 
