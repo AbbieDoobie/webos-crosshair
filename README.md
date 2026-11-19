@@ -126,7 +126,7 @@ The crosshair is three parts in two packages:
 
 | Part | Package | Role |
 |---|---|---|
-| Service (`org.abbie.crosshair.service`) | `org.abbie.crosshair` | Root JS service. Stores settings, applies the power-on rule, and starts or closes the dot app. |
+| Service (`org.abbie.crosshair.service`) | `org.abbie.crosshair` | Root service, in JS or native C (same methods and files). Stores settings, applies the power-on rule, and starts or closes the dot app. |
 | Settings (`org.abbie.crosshair`) | `org.abbie.crosshair` | Overlay web app with the on-TV panel. Takes remote focus while open. |
 | Dot (`org.abbie.crosshair.dot`) | `org.abbie.crosshair.dot` | Transparent `floating` web app that draws the crosshair as SVG. Hidden from the app list. |
 
@@ -142,7 +142,7 @@ The crosshair is three parts in two packages:
 ### Measurements (C2, webOS 10.3.1)
 
 - Game Optimizer, ALLM, VRR, HDR, and the refresh rate are unchanged with the crosshair up (checked at 4K 120 Hz HDR10 with `scripts/tv/gamecheck.sh`).
-- About 30 MB for the dot app while on, and about 21 MB for the service. No CPU use while idle.
+- About 30 MB for the dot app while on. The JS service takes about 21 MB (6.9 MB of it its own, the rest shared Node code); the native service takes 2 MB (0.5 MB its own). No CPU use while idle.
 - Input lag has not been measured, though none was noticeable in testing.
 
 ### Limitations
@@ -187,6 +187,14 @@ python scripts/deploy.py <ssh-host>
 
 `build.py` stages each part with its shared files, generates the icons, and writes both IPKs to `build/`. `deploy.py` copies them to the TV, installs them (checking the installed version and retrying once), elevates the service, installs the boot hook, and restarts the service. `<ssh-host>` is anything `ssh` accepts, such as `root@<tv-ip>` or a Host alias from your SSH config.
 
+### Native service
+
+`python scripts/build.py --native` ships the C service in `crosshair/native/` instead of the JS one. It needs CMake and the [buildroot-nc4](https://github.com/openlgtv/buildroot-nc4) webOS toolchain (built and tested with release `webos-a38c582`), extracted with `relocate-sdk.sh` run. The toolchain runs on Linux; on Windows, `build.py` runs `scripts/build-native.sh` in WSL (distro `Ubuntu-24.04`, or set `CROSSHAIR_WSL_DISTRO`). Set `TOOLCHAIN` if the SDK isn't in `~/arm-webos-linux-gnueabi_sdk-buildroot`.
+
+- `scripts/gen_schema.py` writes the C settings table from `config.js`, so defaults, limits, and shapes stay in one place.
+- `scripts/native_parity.py <ssh-host>` runs a few thousand random settings patches through `config.js` and through the C code on the TV, and checks that they match.
+- `ares-package` takes file modes from the disk, and Windows has none, so `build.py` marks the service binary executable inside the IPK.
+
 ### Development previews
 
 Serve the repository with `python -m http.server` and open:
@@ -208,9 +216,10 @@ Run on the TV over SSH (`ssh -tt`, so `luna-send` prints its replies):
 | `crosshair/dot/` | The floating dot app |
 | `crosshair/settings/` | The settings panel app |
 | `crosshair/service/` | The root JS service |
+| `crosshair/native/` | The same service in C (`--native`) |
 | `crosshair/shared/` | `config.js` (settings schema and validation), `render.js` (drawing), and `luna.js` (bus client), copied into each package |
 | `crosshair/boot/` | Homebrew Channel boot hook |
-| `scripts/` | `build.py`, `deploy.py`, and `icons.py` (launcher icons) |
+| `scripts/` | `build.py`, `deploy.py`, `icons.py` (launcher icons), and the native build scripts |
 | `scripts/tv/` | Scripts to run on the TV |
 | `dev/` | Desktop previews |
 

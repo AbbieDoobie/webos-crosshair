@@ -1,6 +1,6 @@
 {
     "id": "org.abbie.crosshair.dot",
-    "version": "0.4.2",
+    "version": "0.5.0",
     "vendor": "Abbie Doobie",
     "type": "web",
     "main": "index.html",
