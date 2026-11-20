@@ -1,10 +1,10 @@
 {
     "id": "com.abbiedoobie.crosshair",
-    "version": "0.6.2",
+    "version": "0.6.3",
     "vendor": "Abbie Doobie",
     "type": "web",
     "main": "index.html",
-    "title": "Crosshair",
+    "title": "Crosshair Overlay",
     "appDescription": "A crosshair on top of whatever your TV is showing",
     "icon": "icon.png",
     "largeIcon": "largeIcon.png",

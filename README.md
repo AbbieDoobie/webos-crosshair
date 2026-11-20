@@ -1,4 +1,4 @@
-# Crosshair (LG webOS TVs)
+# Crosshair Overlay (LG webOS TVs)
 
 A crosshair on top of whatever your TV is currently showing. Pick a shape, color, and size, and the crosshair will overlay itself over the picture.
 
@@ -18,7 +18,7 @@ Made for console and PC games that don't have a crosshair of their own (or only 
 
 | What you do | What happens |
 |---|---|
-| Open **Crosshair** from the app list | The settings panel opens over the game |
+| Open **Crosshair Overlay** from the app list | The settings panel opens over the game |
 | Change a look setting while the crosshair is on | The real crosshair updates live |
 | Select a look setting while the crosshair is off | A preview shows exactly where the real one would go |
 | Press your remote button once **(if set up)** | Crosshair turns on or off |
@@ -35,7 +35,7 @@ Made for console and PC games that don't have a crosshair of their own (or only 
 ## Initial Setup
 
 1. Install `com.abbiedoobie.crosshair_<version>_all.ipk`.
-2. Open **Crosshair** from the app list. The first time, it gets root access through the Homebrew Channel by itself (a note shows under the title for a couple of seconds), and sets itself up to start with the TV.
+2. Open **Crosshair Overlay** from the app list. The first time, it gets root access through the Homebrew Channel by itself (a note shows under the title for a couple of seconds), and sets itself up to start with the TV.
 3. Turn it on.
 
 After an update, open Crosshair once (or reboot the TV) so it gets root again; until then it uses the default look. If a warning stays under the title, it couldn't get root: check that the TV is rooted and the Homebrew Channel is installed.
@@ -120,25 +120,25 @@ Up/Down picks a row, Left/Right changes it (hold to speed up on long ranges), OK
 
 ### How it works
 
-The crosshair is two parts in one package, `com.abbiedoobie.crosshair`:
+Crosshair has two parts:
 
 | Part | Role |
 |---|---|
 | Service (`com.abbiedoobie.crosshair.service`) | Native (C) root service. Stores settings, applies the power-on rule, and starts or closes the app. |
 | App (`com.abbiedoobie.crosshair`) | Transparent `floating` web app that draws the crosshair as SVG and holds the on-TV settings panel. |
 
-- The app is a `floating` window: a compositor layer above full-screen windows (inputs, apps, and, on webOS 10, the Home screen) and below the TV's overlay menus, popups, and notifications. Unlike overlay windows, it isn't closed by the compositor's 2-minute idle timer.
+- The app is a `floating` window: a compositor layer above full-screen windows (inputs, apps, and, on webOS 10, the Home screen) and below the TV's overlay menus, popups, and notifications.
 - The window takes remote focus only while the settings panel is open: the page sets the `needFocus` window property when the panel opens and clears it when it closes, and the compositor follows the property live. With the panel closed, the remote goes to whatever is underneath.
 - The service launches the app with `{"dot": true}` to show the crosshair. Any other launch (the app list or the triple press) opens the panel. While open, the panel holds a `getConfig` subscription with `panel: true`, which keeps the app loaded even with the crosshair off.
 - When neither the crosshair nor the panel is up, the app is closed entirely, since a loaded floating window interferes with Home and Back. Turning the crosshair on relaunches it in about half a second (the first launch after an install takes several seconds).
-- The service is event driven, with no polling loops. It subscribes to the power state, the running-app list, the foreground app, and the picture settings, and does nothing between events.
+- The service is event driven. It subscribes to the power state, the running-app list, the foreground app, and the picture settings, and does nothing between events.
 - **Storage writes.** Turning the crosshair on or off never writes to the TV's storage: on/off lives in RAM (`/tmp`), and the power-on rule sets it after every boot. Other settings are saved to `config.json` once changes stop for 10 seconds, when the settings panel closes, or when the TV powers down, and only if something actually changed.
 - **Power-on rule.** After a boot or a wake from standby, `visible` is set to `autoStart`. A restart of the service alone (reinstall, crash) keeps the current state; `/tmp/com.abbiedoobie.crosshair.booted` marks that the boot already happened and holds the on/off state.
 - **HDR detection.** The `dynamicRange` dimension of the picture settings (for example `hdrALLM`) selects `hdrBrightness` over `brightness`.
 - **Hide on Home and apps.** The first non-crosshair entry in `getForegroundAppInfo` is the main app. Only `com.webos.app.hdmi*`, `livetv`, and `externalinput.*` count as inputs.
 - The app is relaunched automatically if it dies on its own, up to 5 times a minute.
 - **Logs.** The service logs through syslog, tagged `com.abbiedoobie.crosshair`; see [Logs](#logs). PmLog, the webOS logger, would be the usual choice, but the TV drops PmLog lines from homebrew unless its developer log recording is switched on.
-- **Root.** Homebrew Channel installs the IPK and nothing more. When the panel sees the service isn't root, it calls Homebrew Channel's `elevateService` for it, then the service's `restart`, and the service comes back as root. Once root, the service writes its boot hook, which re-runs `elevate-service` at every boot (an update reinstalls the service without root) before starting it.
+- **Root.** The panel sets it up: when it sees the service isn't root, it calls Homebrew Channel's `elevateService` for it, then the service's `restart`, and the service comes back as root. Once root, the service writes its boot hook, which re-runs `elevate-service` at every boot (an update reinstalls the service without root) before starting it.
 - **Crash recovery.** The process the hub starts is a small supervisor that runs the service in a child process. If the service crashes or is killed, the supervisor starts it again a second later, up to 5 times a minute; a normal stop isn't restarted. The supervisor takes about 0.15 MB.
 
 ### Measurements (C2, webOS 10.3.1)
