@@ -1,11 +1,7 @@
 /*
- * Crosshair settings: defaults, limits, validation, and color helpers.
- *
- * Shared by the settings panel (which needs the same limits and choices to draw its
- * controls) and the renderer, and the source of the native service's settings table
- * (scripts/gen_schema.py), so the service validates the same way. Written as a UMD-style
- * file so it loads with require() in Node (the build scripts) and with a <script> tag in a
- * web app.
+ * Crosshair settings: defaults, limits, validation, and color helpers. Used by the panel and
+ * renderer, and by scripts/gen_schema.py to build the native service's settings table, so
+ * both validate the same way. UMD-style, so it loads with require() in Node or a <script> tag.
  */
 (function (root, factory) {
     if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -77,14 +73,11 @@
         offsetY: { min: -500, max: 500, step: 1 }
     };
 
-    //`visible` is the on/off switch. `autoStart` decides what it is after the TV powers on
-    //(boot, or wake from standby): on if true, off if false. `brightness` applies to SDR
-    //pictures and `hdrBrightness` to HDR ones, because the TV draws app graphics far
-    //brighter while it shows HDR. `tripleOpensSettings` makes three quick presses of the
-    //remote button open the settings panel (one press still turns the crosshair on or off).
-    //`hideOutsideInputs` hides it while Home or an app is in front instead of an input.
-    //`verboseLogging` makes the service log everything it does to the system log, not just
-    //start, stop, warnings, and errors.
+    //visible = on/off. autoStart = on/off after the TV powers on (boot, or wake from standby).
+    //brightness for SDR, hdrBrightness for HDR (the TV draws app graphics far brighter in HDR).
+    //tripleOpensSettings = three quick presses open the panel. hideOutsideInputs = hide while
+    //Home or an app is in front. verboseLogging = log everything, not just start, stop,
+    //warnings, and errors.
     var DEFAULTS = {
         visible: false,
         autoStart: false,
@@ -109,15 +102,15 @@
     var BOOLS = ['visible', 'autoStart', 'tripleOpensSettings', 'hideOutsideInputs', 'outline',
         'verboseLogging'];
 
-    //Clamp a number to its range. Anything that isn't a number (or a numeric string) kicks
-    //back `fallback`, the current value.
+    //Clamp a number to its range and snap it to the step. Anything that isn't a number (or a
+    //numeric string) kicks back `fallback`, the current value.
     function clampNumber(key, value, fallback) {
         var spec = NUMBERS[key];
         var n = typeof value === 'number' ? value
             : (typeof value === 'string' && value.trim() !== '') ? Number(value) : NaN;
         if (!isFinite(n)) return fallback;
         n = Math.min(spec.max, Math.max(spec.min, n));
-        //Snap to the step so repeated adjustments never drift (0.1 + 0.05 + ...).
+        //Snap so repeated adjustments never drift (0.1 + 0.05 + ...)
         n = spec.min + Math.round((n - spec.min) / spec.step) * spec.step;
         return Math.round(n * 1000) / 1000;
     }
@@ -153,7 +146,7 @@
     }
 
     //---------------------------------------------------------------------------------------
-    //Color helpers.
+    //Color helpers
 
     function hexToRgb(hex) {
         var n = parseInt(hex.slice(1), 16);
@@ -197,8 +190,8 @@
         return (Math.round(h / step) * step) % 360;
     }
 
-    //Panel rows that change how the crosshair looks (the panel previews while one is
-    //selected). Includes the "hue" and "center" rows, which aren't stored settings.
+    //Panel rows that change the look (the panel previews while one is selected). Includes
+    //"hue" and "center", which aren't stored settings.
     var LOOK_KEYS = ['shape', 'color', 'hue', 'size', 'thickness', 'gap', 'opacity',
         'brightness', 'hdrBrightness', 'outline', 'outlineColor', 'outlineWidth',
         'offsetX', 'offsetY', 'center'];

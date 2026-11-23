@@ -1,22 +1,13 @@
 /*
  * On-TV settings panel, in the same floating window as the crosshair.
  *
- * The window takes the remote only while the panel is open (the needFocus window
- * property); with the panel closed, the remote goes to whatever is underneath. While open,
- * the panel holds a getConfig subscription with panel: true, which tells the service to
- * keep the app loaded even with the crosshair off.
+ * While open, the window takes the remote (needFocus) and holds a getConfig subscription with
+ * panel: true, which keeps the app loaded even with the crosshair off. Every change goes
+ * straight to the service. With the crosshair off, the panel previews it while a look setting
+ * is selected.
  *
- * The service needs root, which comes from Homebrew Channel. If it isn't root yet (a fresh
- * install), the panel asks Homebrew Channel to elevate it, then restarts it so it comes back
- * as root. The warning under the title only shows if that fails.
- *
- * Every change goes straight to the service. While the crosshair shows, it shows each
- * change. While it doesn't, this panel draws a preview of it whenever a look setting is
- * selected, with the same drawing code.
- *
- * Remote: Up/Down choose a row, Left/Right change it (hold to speed up), OK toggles or
- * runs it, Back closes. The Magic Remote pointer works too: click a row's arrows, a
- * switch, or the row itself.
+ * Remote: Up/Down choose a row, Left/Right change it (hold to speed up), OK toggles or runs it,
+ * Back closes. The Magic Remote pointer works too.
  */
 (function () {
     'use strict';
@@ -38,9 +29,9 @@
     var config = null;
     var hdr = false;            //The TV is showing HDR, so HDR brightness is in use
     var dotShown = false;       //The crosshair is on screen (the service's show flag)
-    //Root setup, tried once per page: '' (not needed or not tried), 'running' (asking Homebrew
-    //Channel), 'restarted' (waiting for the old service to drop), 'reconnecting' (waiting for
-    //the new one), 'done', or 'failed'
+    //Root setup, tried once per page. '' = not needed or not tried. 'running' = asking Homebrew
+    //Channel. 'restarted' = waiting for the old service to drop. 'reconnecting' = waiting for
+    //the new one. Then 'done' or 'failed'.
     var rootSetup = '';
     var selectedKey = 'visible';
     var requestSeq = 0;         //Sequence number of the newest setConfig sent
@@ -110,7 +101,7 @@
     }
 
     //-----------------------------------------------------------------------------------
-    //Changing values.
+    //Changing values
 
     function send(patch) {
         config = C.merge(config, patch);   //Show it at once; the service has the final say
@@ -138,8 +129,8 @@
         if (!same) render();
     }
 
-    //Work out how many steps one press moves, growing while Left/Right is held. Only for
-    //settings with long ranges; short ones stay one step per press.
+    //Work out how many steps one press moves, growing while Left/Right is held (long ranges
+    //only; short ones stay one step per press)
     function stepsFor(row) {
         var range;
         if (row.type === 'hue') range = 360 / HUE_STEP;
@@ -155,7 +146,7 @@
         var patch = {};
         var v = config[row.key];
         if (row.type === 'bool') {
-            //Like a switch: Right turns it on, Left turns it off.
+            //Like a switch: Right turns it on, Left turns it off
             if (v === (dir > 0)) return;
             patch[row.key] = dir > 0;
         } else if (row.type === 'choice' || row.type === 'color') {
@@ -216,8 +207,8 @@
         subscribe();
     }
 
-    //Hide the panel and hand back the remote. With the crosshair off there's nothing left
-    //to show, so the app closes (the service would close it too once the subscription ends).
+    //Hide the panel and hand back the remote. With the crosshair off, close the app too
+    //(nothing left to show).
     function close() {
         if (!isOpen) return;
         isOpen = false;
@@ -231,7 +222,7 @@
     }
 
     //-----------------------------------------------------------------------------------
-    //Drawing.
+    //Drawing
 
     function showMessage(text) {
         messageEl.textContent = text || '';
@@ -245,10 +236,9 @@
         updateScrollFade();
     }
 
-    //Get the service elevated if it isn't root yet. Without root, settings aren't kept and
-    //the crosshair won't follow the TV's power state reliably. Homebrew Channel's elevateService
-    //patches the service's permissions; the restart brings it back as root, and the
-    //subscription picks it up again by itself.
+    //Get the service elevated if it isn't root yet (a fresh install). Homebrew Channel's
+    //elevateService patches its permissions, the restart brings it back as root, and the
+    //subscription picks it up again by itself. The warning only shows if that fails.
     function checkRoot(elevated) {
         if (elevated !== false) {
             if (rootSetup && rootSetup !== 'failed') rootSetup = 'done';
@@ -393,8 +383,7 @@
             rowsEl.appendChild(el);
         });
 
-        //Keep the selected row in view, clear of the faded edges, when the list is taller
-        //than the panel.
+        //Keep the selected row in view, clear of the faded edges
         if (selectedEl) {
             var margin = 80;                    //More than the 56px edge fade
             var top = selectedEl.offsetTop;     //Relative to #rows (the offset parent)
@@ -415,7 +404,7 @@
     }
 
     //-----------------------------------------------------------------------------------
-    //Remote keys.
+    //Remote keys
 
     function moveSelection(dir) {
         var rows = selectableRows();
@@ -463,8 +452,8 @@
 
     //-----------------------------------------------------------------------------------
 
-    //Follow the service's settings while open. If it drops (reinstall, crash), drop the
-    //dead subscription and keep trying, so the panel picks the service back up by itself.
+    //Follow the service's settings while open. If it drops (reinstall, crash), keep retrying
+    //so the panel picks it back up by itself.
     function subscribe() {
         retryTimer = 0;
         var token = {};
@@ -490,8 +479,8 @@
                 hdr = reply.hdr;
                 if (config) render();
             }
-            //While our own changes are in flight, the pushes are echoes of older values and
-            //would make a held arrow key flicker backwards.
+            //Ignore pushes while our own changes are in flight (they're echoes of older values
+            //and would make a held arrow key flicker backwards)
             if (inFlight === 0) takeConfig(reply.config);
         });
         if (token === current) subscription = handle;

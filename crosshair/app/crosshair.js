@@ -1,11 +1,7 @@
 /*
- * The crosshair: draws the service's settings and redraws only when they change. Also
- * decides, from how the app was launched, whether to open the settings panel.
- *
- * Nothing runs between changes: no timers, no animation frames. The drawing is a static
- * SVG that the compositor only has to blend. The service launches this app with
- * { dot: true } to show the crosshair, and closes it when neither the crosshair nor the
- * panel is up. Any other launch (the app list, the triple press) opens the panel.
+ * The crosshair: draws the service's settings, redrawing only when they change (no timers or
+ * animation frames, just a static SVG for the compositor to blend). The service launches the
+ * app with { dot: true } to show it. Any other launch (app list, triple press) opens the panel.
  */
 (function () {
     'use strict';
@@ -13,8 +9,8 @@
     var SERVICE = 'luna://com.abbiedoobie.crosshair.service/';
     var RETRY_MS = 2000;
 
-    //Nothing is drawn until the service answers, so a crosshair that is meant to be off
-    //never flashes up.
+    //Nothing is drawn until the service answers, so a crosshair that's meant to be off never
+    //flashes up
     var svg = document.getElementById('crosshair');
 
     function subscribe() {

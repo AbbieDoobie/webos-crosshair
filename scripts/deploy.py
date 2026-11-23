@@ -68,7 +68,7 @@ pkill -f "__SERVICE__" 2>/dev/null || true
 sleep 1
 luna-send -n 1 luna://__SERVICE__/start '{}'
 echo
-rm -f /tmp/com.abbiedoobie.crosshair*.ipk
+rm -f /tmp/com.abbiedoobie.crosshair*.ipk /tmp/crosshair-install-*.log /tmp/crosshair-elevate.log
 """
 
 

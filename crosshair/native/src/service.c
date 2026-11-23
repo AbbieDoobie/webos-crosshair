@@ -1,46 +1,20 @@
 /*
- * com.abbiedoobie.crosshair.service: owns the crosshair settings and keeps the dot on screen.
- * The dot and the settings panel are one floating web app, com.abbiedoobie.crosshair. The service
- * keeps it loaded while the dot should show or the panel is open, and closes it otherwise.
- *
- * Runs as root (Homebrew Channel's elevate-service). Event driven: a glib main loop with
- * four subscriptions (power state, the running-app list, the foreground app, and the
- * picture settings for HDR), and nothing running between events.
+ * com.abbiedoobie.crosshair.service: keeps the settings and loads or closes the app (dot and
+ * settings panel, one floating web app) to match. Runs as root through Homebrew Channel's
+ * elevate-service. Event driven: four subscriptions (power, running apps, foreground app, and
+ * picture settings for HDR), nothing running between events.
  *
  * Methods (luna://com.abbiedoobie.crosshair.service/<method>):
- *   getConfig {subscribe}   current settings, whether the dot should be on screen now
- *                           (show), whether the picture is HDR, and whether the service
- *                           runs as root; with subscribe, a reply after every change.
- *                           The panel subscribes with panel: true, which keeps the app
- *                           loaded until it cancels
- *   setConfig {config}      apply a partial settings object; invalid fields are skipped
- *                           and keep their current value
- *   resetConfig             defaults for the look, keeping on/off, auto-start, and the
- *                           triple-press, hide-outside-inputs, and logging settings as they are
+ *   getConfig {subscribe}   settings, show (dot should be on screen), hdr, and elevated. With
+ *                           panel: true, the subscription keeps the app loaded until cancelled
+ *   setConfig {config}      apply a partial settings object (invalid fields are skipped)
+ *   resetConfig             look settings back to defaults (on/off and the switches are kept)
  *   show / hide / toggle    turn the crosshair on or off
- *   button                  the remote button (Input Hook calls this): one press toggles;
- *                           with tripleOpensSettings, three quick presses open the panel
- *   status                  settings plus whether the app is loaded, whether the panel is
- *                           open, and the power state
- *   start                   no-op; the boot hook calls it to start the service
- *   restart                 save and exit; the next call starts it again (the panel uses
- *                           this after getting it elevated, so it comes back as root)
- *
- * Power-on rule: after the TV boots or wakes from standby, the crosshair is on if
- * auto-start is on, and off otherwise. The dim "Screen Off" state isn't a power-on.
- *
- * With hideOutsideInputs, the dot is also hidden while Home or an app is in front, and
- * comes back on an input (HDMI, live TV, AV). The on/off setting itself doesn't change.
- *
- * Root comes from Homebrew Channel. The panel asks it to elevate the service the first time
- * (store installs have no SSH), and once root, the service writes its own boot hook, which
- * keeps it elevated and starts it at every boot.
- *
- * Crash recovery: the process the hub starts supervises the service in a child process and
- * restarts it a second after it dies abnormally, up to 5 times a minute (see supervise()).
- *
- * Logging goes to the system log (syslog, tagged com.abbiedoobie.crosshair): start, stop,
- * warnings, and errors always, and everything else only with verboseLogging on.
+ *   button                  remote button, from Input Hook. One press toggles, three quick
+ *                           presses open the panel (if tripleOpensSettings)
+ *   status                  settings plus app, panel, power, and input state
+ *   start                   no-op, so the boot hook can start the service
+ *   restart                 save and exit, so the next call starts it fresh (as root, once elevated)
  */
 #include <ctype.h>
 #include <errno.h>
@@ -69,16 +43,13 @@
 #define CONFIG_DIR "/home/root/.config/com.abbiedoobie.crosshair"
 #define CONFIG_FILE CONFIG_DIR "/config.json"
 #define LOG_IDENT "com.abbiedoobie.crosshair"
-//The /tmp folder is RAM (tmpfs) and emptied every boot, so a missing marker means this is
-//the first start since boot, rather than a restart (reinstall, crash) that should keep the
-//current on/off. The marker holds that on/off, so turning the crosshair on or off never
-//writes to the TV's storage.
+//The /tmp folder is RAM and emptied every boot, so no marker means first start since boot
+//(not a reinstall or crash restart). It also holds on/off, so toggling never writes to storage.
 #define BOOT_MARKER "/tmp/com.abbiedoobie.crosshair.booted"
 
-//Boot hook, run as root at boot by Homebrew Channel (run-parts, so no dots in the name). It
-//removes itself if Crosshair is uninstalled, keeps the service elevated (an update reinstalls
-//it without root), and starts it, which puts the crosshair back if auto-start is on. Runs in
-//the background so it doesn't hold up the other hooks.
+//Boot hook, run as root by Homebrew Channel (run-parts, so no dots in the name). Removes
+//itself if Crosshair is uninstalled, re-elevates the service (an update drops root), and
+//starts it. Backgrounded so it doesn't hold up the other hooks.
 #define BOOT_HOOK "/var/lib/webosbrew/init.d/95-abbiedoobie-crosshair"
 #define BOOT_HOOK_TEXT \
     "#!/bin/sh\n" \
@@ -91,23 +62,19 @@
     ") >/dev/null 2>&1 &\n" \
     "exit 0\n"
 
-//Settings changes arrive in bursts while the panel is open. Save once things go quiet, or
-//right away when the panel closes (its subscription ends) or the TV powers down.
+//Save once a burst of panel changes goes quiet (or right away on panel close or power-down)
 #define SAVE_DELAY_MS 10000
 #define WAKE_DELAY_MS 1500          //Let the compositor settle after the screen comes on
-//An app started for its panel (from the app list or the triple press) is kept this long
-//for the panel to open, then closed if it didn't
-#define PANEL_GRACE_MS 10000
-//Failsafe: budget for relaunching an app that died by itself, so a crashing app can't
-//loop forever. Launches you cause (on/off, coming back to an input, waking) don't count.
+#define PANEL_GRACE_MS 10000        //Keep an app launched for its panel this long for the panel to open
+//Failsafe: cap relaunches of an app that died by itself, so a crashing app can't loop forever
+//(launches from on/off, inputs, and waking don't count)
 #define LAUNCH_WINDOW_MS 60000
 #define LAUNCH_BUDGET 5
-//Presses count as one gesture while each comes within PRESS_GAP_MS of the one before.
-//A press normally reaches the service about 30 ms after lginput2 sees it, so this is generous.
+//Max gap between presses of one gesture. A press lands ~30 ms after lginput2 sees it, so this is generous.
 #define PRESS_GAP_MS 600
 #define RESUBSCRIBE_S 5
-//Crash recovery: restart the service after RESTART_DELAY_S, at most RESTART_BUDGET times
-//in RESTART_WINDOW_S. EXIT_NO_RESTART means a restart can't help (setup failed).
+//Crash recovery: restart after RESTART_DELAY_S, at most RESTART_BUDGET times in RESTART_WINDOW_S.
+//EXIT_NO_RESTART = setup failed, so a restart can't help.
 #define RESTART_DELAY_S 1
 #define RESTART_WINDOW_S 60
 #define RESTART_BUDGET 5
@@ -121,8 +88,6 @@ static config_t config;
 static char saved_text[JSON_MAX];   //What config.json holds now, to skip writes that change nothing
 static bool config_dir_ready;
 static guint save_timer;
-//The tvpower states in which apps keep running. "Screen Off" is the dim semi-sleep: the
-//compositor hides the dot itself and shows it again on wake, so it counts as up.
 static char power_state[32] = "Active";
 static int app_running = -1;        //-1 = no reply yet. 1 = loaded. 0 = not running.
 static bool panel_open;             //The panel holds a getConfig subscription with panel: true
@@ -134,19 +99,15 @@ static char dynamic_range[64];
 static gint64 launch_times[LAUNCH_BUDGET];
 static int launch_count;
 static bool launch_pending;
-//Root comes from Homebrew Channel's elevate-service. Without it the service can't keep
-//settings in /home/root, so the settings panel warns.
-static bool elevated;
+static bool elevated;               //Running as root (without it, settings in /home/root aren't kept)
 static int press_count;
 static guint press_timer;
 
 //---------------------------------------------------------------------------------------
-//Logging, to the system log through syslog. The TV keeps syslog lines in its legacy log
-//(/var/log/legacy-log, in RAM), tagged LOG_IDENT. PmLog would be the webOS way, but the TV
-//drops PmLog lines from homebrew unless its developer log recording is switched on.
-//Start, stop, warnings, and errors are always logged; everything else (presses, launches,
-//the panel, power, and the picture) only while the Verbose logging setting is on. Each line
-//starts with an ID, to make it easy to grep for.
+//Logging, through syslog, which the TV keeps in /var/log/legacy-log (RAM). PmLog would be the
+//webOS way, but the TV drops homebrew PmLog lines unless dev log recording is on.
+//Start, stop, warnings, and errors always log; everything else only with Verbose logging on.
+//Each line starts with an ID for grepping.
 
 static void log_msg(int priority, const char *msgid, const char *fmt, ...) G_GNUC_PRINTF(3, 4);
 
@@ -172,7 +133,7 @@ static void log_msg(int priority, const char *msgid, const char *fmt, ...)
     do { if (config_bool(&config, "verboseLogging")) log_msg(LOG_INFO, id, __VA_ARGS__); } while (0)
 
 //---------------------------------------------------------------------------------------
-//Small JSON helpers.
+//Small JSON helpers
 
 static jvalue_ref parse_json(const char *text)
 {
@@ -246,15 +207,17 @@ static void call_once(const char *uri, const char *payload, LSFilterFunc cb, voi
 }
 
 //---------------------------------------------------------------------------------------
-//Settings storage.
+//Settings storage
 
+//Check if apps keep running in this power state. "Screen Off" is the dim semi-sleep: the
+//compositor hides the dot itself and brings it back on wake.
 static bool up_state(const char *state)
 {
     return strcmp(state, "Active") == 0 || strcmp(state, "Screen Off") == 0;
 }
 
-//Build the text config.json should hold. On/off isn't in it: the power-on rule sets it
-//after every boot, and a restart in between reads it from the boot marker in RAM.
+//Build the text config.json should hold. On/off is left out: the power-on rule sets it every
+//boot, and the boot marker covers restarts.
 static void stored_text(const config_t *c, char *buf, size_t size)
 {
     if (!config_json(c, buf, size, true, "visible")) buf[0] = '\0';
@@ -339,10 +302,8 @@ static void write_visible_state(void)
 }
 
 //---------------------------------------------------------------------------------------
-//The app runs only while the dot should show or the panel is open.
-//
-//Otherwise it's closed completely: a loaded floating window, even an empty one, stops the
-//Home menu from opening. Relaunching a previously loaded web app takes about 0.4 s.
+//App lifetime. The app runs only while the dot should show or the panel is open, since a
+//loaded floating window (even an empty one) blocks the Home menu. Relaunching takes ~0.4 s.
 
 static void broadcast(void);
 static void close_app(bool force);
@@ -436,7 +397,8 @@ static void apply_config(const config_t *next)
     broadcast();
     if (visibility_changed) log_verbose("CROSSHAIR", "crosshair %s", config_bool(&config, "visible") ? "on" : "off");
     if (visibility_changed || hide_changed) {
-        update_app(visibility_changed ? "turned on" : "hide setting changed");
+        update_app(!visibility_changed ? "hide setting changed"
+                   : config_bool(&config, "visible") ? "turned on" : "turned off");
     }
 }
 
@@ -447,6 +409,7 @@ static void set_visible(bool visible)
     apply_config(&next);
 }
 
+//Power-on rule: after a boot or a wake from standby, on/off follows auto-start
 static void apply_power_on_rule(const char *reason)
 {
     bool auto_start = config_bool(&config, "autoStart");
@@ -454,8 +417,7 @@ static void apply_power_on_rule(const char *reason)
     set_visible(auto_start);
 }
 
-//Build the getConfig reply: settings, whether the dot shows, HDR, root, and whether this
-//is a subscription
+//Build the getConfig reply
 static void config_reply(char *buf, size_t size, bool subscribed, bool with_return)
 {
     char c[JSON_MAX];
@@ -482,8 +444,8 @@ static void broadcast(void)
 }
 
 //---------------------------------------------------------------------------------------
-//Subscriptions to the system. Each one holds a call open; when the other end goes away
-//(the hub sends an error), drop it and subscribe again a little later.
+//System subscriptions. When the other end goes away (the hub sends an error), drop it and
+//subscribe again a little later.
 
 typedef struct watch watch_t;
 typedef void (*watch_fn)(jvalue_ref payload);
@@ -536,8 +498,8 @@ static void watch_start(watch_t *w)
     }
 }
 
-//HDR detection. The picture settings carry the current dynamic range as a "dimension"
-//(seen: "hdrALLM" for HDR10 game content with ALLM), and push a reply when it changes.
+//Detect HDR from the picture settings' dynamic range "dimension" (seen: "hdrALLM" for HDR10
+//games with ALLM)
 static void on_picture(jvalue_ref r)
 {
     char range[64];
@@ -607,9 +569,8 @@ static bool is_input_app(const char *id)
     return strncmp(id, "livetv", 6) == 0 || strncmp(id, "externalinput.", 14) == 0;
 }
 
-//Watch the foreground app to hide the dot outside inputs. The list has the main app first,
-//then anything layered over it (quick settings, our own app). Only the main app
-//decides, so the picture menus over HDMI keep the crosshair.
+//Hide the dot outside inputs. The list has the main app first, then anything layered over it
+//(quick settings, our own app). Only the main app decides, so menus over HDMI keep the crosshair.
 static void on_foreground(jvalue_ref r)
 {
     jvalue_ref list = get(r, "foregroundAppInfo");
@@ -657,11 +618,10 @@ static void on_power(jvalue_ref r)
     //Write any pending settings before a power-down can cut them off
     if (!up_state(state)) save_now();
     if (strcmp(state, "Active") != 0) return;
-    //Semi-sleep restores the window by itself and needs nothing.
+    //Semi-sleep restores the window by itself
     if (up_state(previous)) return;
-    //A real power-on: apply the auto-start rule. Standby also clears floating windows
-    //even if the app stayed loaded, so relaunch unconditionally: on a loaded app that
-    //just remaps its window.
+    //Real power-on: apply auto-start. Standby drops floating windows even with the app still
+    //loaded, so relaunch regardless (a loaded app just remaps its window).
     char reason[64];
     snprintf(reason, sizeof(reason), "wake from %s", previous);
     apply_power_on_rule(reason);
@@ -680,7 +640,7 @@ static watch_t watches[] = {
 };
 
 //---------------------------------------------------------------------------------------
-//Luna methods.
+//Luna methods
 
 //Count the panel's subscriptions to see if it's open, and load or close the app to match
 static void update_panel(void)
@@ -721,8 +681,8 @@ static gboolean panel_check_cb(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
-//A subscriber left. If it was the panel, the burst of changes is over, so save now. The
-//panel count is checked once the hub has dropped the subscription.
+//Save now when a subscriber leaves (if it was the panel, the burst of changes is over). The
+//panel count is checked on idle, once the hub has dropped the subscription.
 static bool subscription_cancel_cb(LSHandle *h, LSMessage *msg, void *ctx)
 {
     (void)h; (void)msg; (void)ctx;
@@ -824,10 +784,9 @@ static gboolean press_timer_cb(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
-//Handle the remote button. The first press toggles right away, so a single press feels
-//instant. A second quick press is held back: on its own it toggles back once the gesture
-//ends, so two presses leave things as they were. A third quick press undoes the first
-//toggle and opens the settings panel instead.
+//Handle the remote button. Press 1 toggles right away so it feels instant. Press 2 is held
+//back and toggles back once the gesture ends (two presses = no change). Press 3 undoes the
+//first toggle and opens the panel instead.
 static bool m_button(LSHandle *h, LSMessage *msg, void *ctx)
 {
     (void)h; (void)ctx;
@@ -874,8 +833,8 @@ static bool m_status(LSHandle *h, LSMessage *msg, void *ctx)
     return true;
 }
 
-//Exit cleanly after the reply goes out. The supervisor doesn't restart a clean exit, so
-//the hub starts a fresh service on the next call (as root, once elevated).
+//Exit cleanly after the reply goes out. The supervisor leaves a clean exit alone, so the hub
+//starts a fresh service on the next call.
 static gboolean restart_cb(gpointer data)
 {
     (void)data;
@@ -959,8 +918,8 @@ static int service_main(void)
     load_config();
 
     loop = g_main_loop_new(NULL, FALSE);
-    //A failed setup won't fix itself on a retry (most often another copy already owns the
-    //bus name), so these exit with EXIT_NO_RESTART and the supervisor stops too.
+    //A failed setup won't fix itself on a retry (usually another copy owns the bus name), so
+    //exit with EXIT_NO_RESTART to stop the supervisor too
     if (!LSRegister(SERVICE_ID, &sh, &err)) return fail("register", &err), EXIT_NO_RESTART;
     if (!LSRegisterCategory(sh, "/", methods, NULL, NULL, &err)) {
         return fail("register methods", &err), EXIT_NO_RESTART;
@@ -974,8 +933,8 @@ static int service_main(void)
     if (elevated) install_boot_hook();
     else log_warn("NOT_ROOT", "running without root (not elevated): settings may not be kept");
     if (access(BOOT_MARKER, F_OK) != 0) {
-        //Write the marker first, so it exists even when the rule leaves on/off as it was.
-        //Worst case (can't write it), the rule runs again on the next start.
+        //Write the marker first, since the rule only writes it when on/off changes. If it
+        //can't be written, the rule just runs again next start.
         write_visible_state();
         apply_power_on_rule("boot");
     }
@@ -989,11 +948,9 @@ static int service_main(void)
 }
 
 //---------------------------------------------------------------------------------------
-//Crash recovery. The process the hub starts is a small supervisor that runs the service
-//in a child and starts it again if it dies abnormally (crash, abort, or kill), so the
-//crosshair keeps following power, Home, and the button without waiting for the next call
-//to wake the hub. The child holds all the state and the bus connection; the supervisor
-//only waits.
+//Crash recovery. The process the hub starts is a small supervisor that runs the service in a
+//child and restarts it if it dies abnormally (crash, abort, or kill), so power, Home, and the
+//button keep working without waiting for the next call to wake the hub.
 
 static volatile sig_atomic_t stop_requested;
 static volatile pid_t child_pid;
@@ -1013,12 +970,16 @@ static int supervise(void)
     sigemptyset(&sa.sa_mask);
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
+    sigset_t stop_signals, old_mask;
+    sigemptyset(&stop_signals);
+    sigaddset(&stop_signals, SIGTERM);
+    sigaddset(&stop_signals, SIGINT);
 
     gint64 starts[RESTART_BUDGET];
     int count = 0;
     for (;;) {
-        //Failsafe: a service that keeps crashing (say, right at startup) gives up instead
-        //of looping forever. The next call to it starts a fresh supervisor.
+        //Failsafe: give up on a service that keeps crashing (say, at startup). The next call
+        //starts a fresh supervisor.
         gint64 now = g_get_monotonic_time() / G_USEC_PER_SEC;
         int kept = 0;
         for (int i = 0; i < count; i++) {
@@ -1031,17 +992,26 @@ static int supervise(void)
         }
         starts[count++] = now;
 
+        //Hold stops until child_pid is set and the child has its own handlers, so a stop
+        //can't slip in between and get lost (the supervisor would then wait forever)
+        sigprocmask(SIG_BLOCK, &stop_signals, &old_mask);
+        if (stop_requested) {
+            sigprocmask(SIG_SETMASK, &old_mask, NULL);
+            return 0;
+        }
         pid_t pid = fork();
+        if (pid == 0) {
+            signal(SIGTERM, SIG_DFL);
+            signal(SIGINT, SIG_DFL);
+            sigprocmask(SIG_SETMASK, &old_mask, NULL);
+            _exit(service_main());
+        }
+        if (pid > 0) child_pid = pid;
+        sigprocmask(SIG_SETMASK, &old_mask, NULL);      //A held stop is handled here
         if (pid < 0) {
             log_error("FORK_FAILED", "can't start the service: %s", strerror(errno));
             return 1;
         }
-        if (pid == 0) {
-            signal(SIGTERM, SIG_DFL);
-            signal(SIGINT, SIG_DFL);
-            _exit(service_main());
-        }
-        child_pid = pid;
 
         int status;
         while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}

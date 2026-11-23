@@ -1,17 +1,14 @@
 /*
- * Draws a crosshair into an <svg> sized 1920x1080 (the web-app coordinate space).
- *
- * Draws both the real crosshair and the settings panel's preview of it (while the crosshair
- * isn't showing), so both put identical pixels in the identical place.
+ * Draws a crosshair into a 1920x1080 <svg> (the web-app coordinate space). Used for both the
+ * real crosshair and the panel's preview, so both put the same pixels in the same place.
+ * Needs config.js loaded first.
  *
  *   CrosshairRender.draw(svg, config, { hdr: bool })   redraws only if something changed
  *   CrosshairRender.clear(svg)
  *
- * Needs CrosshairConfig (config.js) loaded first.
- *
- * Every part is either a filled shape (rect, polygon, circle) or a stroked one (ring, open
- * or closed path). The outline is the same parts drawn underneath in the outline color:
- * filled parts get a stroke around them, stroked parts get a wider stroke.
+ * Every part is filled (rect, polygon, circle) or stroked (ring, path). The outline is the
+ * same parts drawn underneath in the outline color: filled parts get a stroke around them,
+ * stroked parts get a wider stroke.
  */
 (function (root) {
     'use strict';
@@ -50,8 +47,8 @@
             }
             stroke(el('circle', attrs));
         }
-        //Draw a straight bar of thickness t from (x1,y1) to (x2,y2), as a filled polygon so
-        //the outline wraps its ends too.
+        //Draw a bar of thickness t from (x1,y1) to (x2,y2), as a filled polygon so the outline
+        //wraps its ends too
         function bar(x1, y1, x2, y2) {
             var dx = x2 - x1;
             var dy = y2 - y1;
@@ -69,7 +66,7 @@
             }));
         }
 
-        //Cross arms: length s, starting g from the center.
+        //Cross arms: length s, starting g from the center
         function armLeft() { rect(cx - g - s, cy - half, s, t); }
         function armRight() { rect(cx + g, cy - half, s, t); }
         function armDown() { rect(cx - half, cy + g, t, s); }
@@ -91,7 +88,7 @@
             dot(centerDot);
             break;
         case 'arcs': {
-            //Four arcs with gaps centered on right, bottom, left, and top.
+            //Four arcs with gaps centered on right, bottom, left, and top
             var r = s / 2;
             var quarter = Math.PI * r / 2;
             var gapLen = Math.min(quarter * 0.8, Math.max(2, g * 2));
@@ -116,7 +113,7 @@
             if (c.shape === 'xdot') dot(centerDot);
             break;
         case 'scope': {
-            //A ring at radius g + s with cross arms running from the gap out to it.
+            //Ring at radius g + s, with cross arms running from the gap out to it
             var rr = g + s;
             ring(rr);
             armLeft(); armRight(); armDown(); armUp();
@@ -143,7 +140,7 @@
             break;
         }
         case 'brackets': {
-            //Four corner brackets around an empty square of half-width g + s/2.
+            //Four corner brackets around an empty square of half-width g + s/2
             var b = g + s / 2;
             var arm = Math.max(t * 2, s / 2);
             [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (q) {
@@ -157,8 +154,8 @@
             break;
         }
         case 'chevron': {
-            //A caret (^) whose point sits on the aim point: two bars, plus a small diamond
-            //that fills the notch where they meet.
+            //Caret (^) with its point on the aim point: two bars, plus a small diamond to fill
+            //the notch where they meet
             bar(cx, cy, cx - s / 2, cy + s / 2);
             bar(cx, cy, cx + s / 2, cy + s / 2);
             var k = half * Math.SQRT2;
@@ -232,7 +229,7 @@
 
         var cx = CX + c.offsetX;
         var cy = CY + c.offsetY;
-        //One group carries the opacity so overlapping parts don't double up.
+        //One group carries the opacity so overlapping parts don't double up
         var group = el('g', { opacity: c.opacity });
 
         if (c.outline) {
