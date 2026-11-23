@@ -5,7 +5,7 @@
     "type": "web",
     "main": "index.html",
     "title": "Crosshair Overlay",
-    "appDescription": "A crosshair on top of whatever your TV is showing",
+    "appDescription": "Places a configurable crosshair over your TV",
     "icon": "icon.png",
     "largeIcon": "largeIcon.png",
     "resolution": "1920x1080",
